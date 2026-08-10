@@ -3,7 +3,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { CopyDocument, Delete, Edit, Key, Lock, Plus, Refresh, Search } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import PageHeader from '@/components/PageHeader.vue'
-import { platformApi, type ApiClientCommand, type ApiClientSummary, type ClientPermission, type InterfaceSummary, type SqlApiSummary } from '@/api/platform'
+import { platformApi, type ApiClientSummary, type ClientPermission, type CreateApiClientCommand, type InterfaceSummary, type SqlApiSummary } from '@/api/platform'
 
 const loading = ref(false)
 const saving = ref(false)
@@ -13,7 +13,7 @@ const sqlApis = ref<SqlApiSummary[]>([])
 const keyword = ref('')
 const dialogVisible = ref(false)
 const editingId = ref<number>()
-const form = reactive<ApiClientCommand>(emptyForm())
+const form = reactive<CreateApiClientCommand>(emptyForm())
 const secretVisible = ref(false)
 const oneTimeSecret = reactive({ appKey: '', appSecret: '' })
 const permissionVisible = ref(false)
@@ -23,11 +23,11 @@ const selectedClient = ref<ApiClientSummary>()
 const checkedPermissions = ref<string[]>([])
 
 const filtered = computed(() => clients.value.filter(item => !keyword.value
-  || `${item.name}${item.appKey}${item.description ?? ''}`.toLowerCase().includes(keyword.value.toLowerCase())))
+  || `${item.code}${item.name}${item.appKey}`.toLowerCase().includes(keyword.value.toLowerCase())))
 const httpResources = computed(() => interfaces.value.map(item => ({ key: `HTTP:${item.code}`, label: `${item.name} · ${item.method} ${item.path}`, enabled: item.enabled })))
 const sqlResources = computed(() => sqlApis.value.map(item => ({ key: `SQL:${item.code}`, label: `${item.name} · ${item.method} ${item.path}`, enabled: item.enabled })))
 
-function emptyForm(): ApiClientCommand { return { name: '', description: '', enabled: true } }
+function emptyForm(): CreateApiClientCommand { return { code: '', name: '', enabled: true, permissions: [] } }
 
 async function load(): Promise<void> {
   loading.value = true
@@ -48,7 +48,7 @@ function openCreate(): void {
 
 function openEdit(row: ApiClientSummary): void {
   editingId.value = row.id
-  Object.assign(form, { name: row.name, description: row.description ?? '', enabled: row.enabled })
+  Object.assign(form, { code: row.code, name: row.name, enabled: row.enabled, permissions: row.permissions })
   dialogVisible.value = true
 }
 
@@ -59,18 +59,19 @@ function showSecret(appKey: string, appSecret: string): void {
 }
 
 async function save(): Promise<void> {
-  if (!form.name) {
-    ElMessage.warning('请输入调用方名称')
+  if (!form.code || !form.name) {
+    ElMessage.warning('请输入调用方编码和名称')
     return
   }
   saving.value = true
   try {
     if (editingId.value) {
-      await platformApi.updateClient(editingId.value, { ...form })
+      const current = clients.value.find(item => item.id === editingId.value)
+      await platformApi.updateClient(editingId.value, { name: form.name, enabled: form.enabled, permissions: current?.permissions ?? [] })
       ElMessage.success('调用方已更新')
     } else {
       const result = await platformApi.createClient({ ...form })
-      showSecret(result.appKey, result.appSecret)
+      showSecret(result.client.appKey, result.appSecret)
       ElMessage.success('调用方已创建，请立即保存 AppSecret')
     }
     dialogVisible.value = false
@@ -83,7 +84,7 @@ async function rotateSecret(row: ApiClientSummary): Promise<void> {
   try {
     await ElMessageBox.confirm('轮换后原 AppSecret 立即失效，调用系统必须同步更新。确定继续吗？', '轮换 AppSecret', { type: 'warning', confirmButtonText: '确认轮换' })
     const result = await platformApi.rotateClientSecret(row.id)
-    showSecret(result.appKey || row.appKey, result.appSecret)
+    showSecret(result.client.appKey, result.appSecret)
   } catch (error) {
     if (error !== 'cancel' && error !== 'close') ElMessage.error(error instanceof Error ? error.message : 'Secret 轮换失败')
   }
@@ -94,8 +95,7 @@ async function openPermissions(row: ApiClientSummary): Promise<void> {
   permissionVisible.value = true
   permissionLoading.value = true
   try {
-    const permissions = await platformApi.clientPermissions(row.id)
-    checkedPermissions.value = permissions.map(item => `${item.resourceType}:${item.resourceCode}`)
+    checkedPermissions.value = row.permissions.map(item => `${item.routeType}:${item.resourceCode}`)
   } catch (error) { ElMessage.error(error instanceof Error ? error.message : '权限加载失败') }
   finally { permissionLoading.value = false }
 }
@@ -106,9 +106,15 @@ async function savePermissions(): Promise<void> {
   try {
     const permissions: ClientPermission[] = checkedPermissions.value.map((value) => {
       const separator = value.indexOf(':')
-      return { resourceType: value.slice(0, separator) as ClientPermission['resourceType'], resourceCode: value.slice(separator + 1) }
+      return { routeType: value.slice(0, separator) as ClientPermission['routeType'], resourceCode: value.slice(separator + 1) }
     })
-    await platformApi.updateClientPermissions(selectedClient.value.id, permissions)
+    const saved = await platformApi.updateClient(selectedClient.value.id, {
+      name: selectedClient.value.name,
+      enabled: selectedClient.value.enabled,
+      permissions,
+    })
+    clients.value = clients.value.map(item => item.id === saved.id ? saved : item)
+    selectedClient.value = saved
     ElMessage.success('接口权限已保存')
     permissionVisible.value = false
   } catch (error) { ElMessage.error(error instanceof Error ? error.message : '权限保存失败') }
@@ -148,7 +154,7 @@ onMounted(load)
     <section class="panel filter-panel"><div class="filter-row"><el-input v-model="keyword" :prefix-icon="Search" clearable placeholder="搜索调用方名称或 AppKey" class="search-input" /><div class="filter-summary">共 <b>{{ filtered.length }}</b> 个调用方</div></div></section>
     <section v-loading="loading" class="panel table-panel">
       <el-table :data="filtered" class="clean-table">
-        <el-table-column label="调用方" min-width="220"><template #default="scope"><div class="primary-cell"><div class="primary-cell__icon"><el-icon><Key /></el-icon></div><div><strong>{{ scope.row.name }}</strong><small>{{ scope.row.description || '未填写说明' }}</small></div></div></template></el-table-column>
+        <el-table-column label="调用方" min-width="220"><template #default="scope"><div class="primary-cell"><div class="primary-cell__icon"><el-icon><Key /></el-icon></div><div><strong>{{ scope.row.name }}</strong><small>{{ scope.row.code }}</small></div></div></template></el-table-column>
         <el-table-column label="AppKey" min-width="250"><template #default="scope"><code class="credential-code">{{ scope.row.appKey }}</code><el-button :icon="CopyDocument" link @click="copy(scope.row.appKey, 'AppKey')" /></template></el-table-column>
         <el-table-column label="状态" width="110"><template #default="scope"><span class="text-status" :class="scope.row.enabled ? 'is-enabled' : 'is-disabled'">{{ scope.row.enabled ? '● 已启用' : '○ 已停用' }}</span></template></el-table-column>
         <el-table-column label="更新时间" min-width="170"><template #default="scope">{{ scope.row.updatedAt ? new Date(scope.row.updatedAt).toLocaleString('zh-CN', { hour12:false }) : '-' }}</template></el-table-column>
@@ -158,8 +164,7 @@ onMounted(load)
 
     <el-dialog v-model="dialogVisible" :title="editingId ? '编辑调用方' : '新增调用方'" width="590px" destroy-on-close>
       <el-form label-position="top" class="dialog-form">
-        <el-form-item label="调用方名称" required><el-input v-model.trim="form.name" placeholder="例如：WMS 生产系统" /></el-form-item>
-        <el-form-item label="说明"><el-input v-model="form.description" type="textarea" :rows="3" placeholder="说明用途、负责人或部署环境" /></el-form-item>
+        <div class="form-grid"><el-form-item label="调用方名称" required><el-input v-model.trim="form.name" placeholder="例如：WMS 生产系统" /></el-form-item><el-form-item label="调用方编码" required><el-input v-model.trim="form.code" :disabled="Boolean(editingId)" placeholder="WMS_PROD" /></el-form-item></div>
         <div class="form-switch-row"><div><strong>启用调用凭证</strong><small>停用后该 AppKey 的所有开放接口请求都会被拒绝</small></div><el-switch v-model="form.enabled" /></div>
       </el-form>
       <template #footer><el-button @click="dialogVisible=false">取消</el-button><el-button type="primary" :loading="saving" @click="save">{{ editingId ? '保存' : '创建并生成凭证' }}</el-button></template>

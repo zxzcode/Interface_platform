@@ -81,6 +81,12 @@ public class GatewayService {
                         "HTTP", route.targetUrl().toString(), exception.status(), exception.code(), exception.getMessage(),
                         requestHeaders, requestSummary, startedAt, timer);
             }
+            if (!httpRoute.get().targetAvailable()) {
+                InterfaceService.RouteConfig route = httpRoute.get();
+                return failure(request, traceId, caller, route.code(), route.name(), route.targetSystem(),
+                        "HTTP", route.targetUrl().toString(), HttpStatus.SERVICE_UNAVAILABLE, "IP-TARGET-002",
+                        "目标系统当前不可用", requestHeaders, requestSummary, startedAt, timer);
+            }
             return executeHttp(httpRoute.get(), request, traceId, caller, requestHeaders,
                     requestSummary, startedAt, timer);
         }
@@ -113,6 +119,11 @@ public class GatewayService {
         long timer = System.nanoTime();
         String contentType = firstHeader(headers, "content-type");
         String requestSummary = sanitizer.sanitizeBody(body, contentType);
+        if (!route.targetAvailable()) {
+            return failure(request, traceId, "MANAGEMENT:" + operator, route.code(), route.name(), route.targetSystem(),
+                    "HTTP", route.targetUrl().toString(), HttpStatus.SERVICE_UNAVAILABLE, "IP-TARGET-002",
+                    "目标系统当前不可用", sanitizer.sanitizeHeaders(headers), requestSummary, startedAt, timer);
+        }
         return executeHttp(route, request, traceId, "MANAGEMENT:" + operator,
                 sanitizer.sanitizeHeaders(headers), requestSummary, startedAt, timer);
     }
@@ -153,7 +164,7 @@ public class GatewayService {
         } catch (IOException | RuntimeException exception) {
             return failure(request, traceId, caller, route.code(), route.name(), route.targetSystem(), "HTTP",
                     route.targetUrl().toString(), HttpStatus.BAD_GATEWAY, "IP-TARGET-001",
-                    rootMessage(exception), requestHeaders, requestSummary, startedAt, timer);
+                    "目标系统调用失败", requestHeaders, requestSummary, startedAt, timer);
         }
     }
 
@@ -180,7 +191,7 @@ public class GatewayService {
         } catch (RuntimeException exception) {
             return failure(request, traceId, caller, route.code(), route.name(), route.datasourceName(), "SQL",
                     "datasource:" + route.datasourceId(), HttpStatus.INTERNAL_SERVER_ERROR, "IP-SQL-500",
-                    rootMessage(exception), requestHeaders, requestSummary, startedAt, timer);
+                    "SQL 查询执行失败", requestHeaders, requestSummary, startedAt, timer);
         }
     }
 
@@ -236,6 +247,7 @@ public class GatewayService {
 
     private Map<String, List<String>> withTrace(Map<String, List<String>> source, String traceId) {
         Map<String, List<String>> headers = new LinkedHashMap<>(source);
+        headers.keySet().removeIf(name -> name.equalsIgnoreCase("X-Trace-Id"));
         headers.put("X-Trace-Id", List.of(traceId));
         return headers;
     }
@@ -251,12 +263,6 @@ public class GatewayService {
 
     private long elapsed(long timer) {
         return (System.nanoTime() - timer) / 1_000_000;
-    }
-
-    private String rootMessage(Throwable throwable) {
-        Throwable current = throwable;
-        while (current.getCause() != null) current = current.getCause();
-        return current.getMessage() == null ? current.getClass().getSimpleName() : current.getMessage();
     }
 
     public record GatewayRequest(String method, String path, String rawQuery,

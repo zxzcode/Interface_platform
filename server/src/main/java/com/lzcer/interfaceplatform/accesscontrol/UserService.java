@@ -18,22 +18,27 @@ import org.springframework.transaction.annotation.Transactional;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 @Service
 public class UserService implements ApplicationRunner {
 
     private static final Logger log = LoggerFactory.getLogger(UserService.class);
     private static final Set<String> ROLES = Set.of("ADMIN", "OPERATOR", "VIEWER");
+    private static final int MAX_FAILED_LOGIN_ATTEMPTS = 5;
+    private static final Duration LOGIN_LOCK_DURATION = Duration.ofMinutes(15);
     private final JdbcClient jdbcClient;
     private final PasswordEncoder passwordEncoder;
     private final JwtTokenService tokenService;
     private final String bootstrapUsername;
     private final String bootstrapPassword;
     private final String bootstrapName;
+    private final ConcurrentHashMap<String, LoginAttempt> failedLogins = new ConcurrentHashMap<>();
 
     public UserService(JdbcClient jdbcClient, PasswordEncoder passwordEncoder, JwtTokenService tokenService,
                        @Value("${platform.security.bootstrap-admin-username:admin}") String bootstrapUsername,
@@ -52,8 +57,7 @@ public class UserService implements ApplicationRunner {
     public void run(ApplicationArguments args) {
         if (jdbcClient.sql("select count(*) from ip_user").query(Long.class).single() > 0) return;
         if (bootstrapPassword == null || bootstrapPassword.isBlank()) {
-            log.warn("No platform user exists. Set PLATFORM_ADMIN_PASSWORD once to initialize the first administrator.");
-            return;
+            throw new IllegalStateException("No platform user exists. Set PLATFORM_ADMIN_PASSWORD to initialize the first administrator.");
         }
         validatePassword(bootstrapPassword);
         jdbcClient.sql("""
@@ -67,10 +71,15 @@ public class UserService implements ApplicationRunner {
     }
 
     public LoginView login(LoginCommand command) {
-        UserRow user = findRowByUsername(normalizeUsername(command.username()));
+        String username = normalizeUsername(command.username());
+        Instant now = Instant.now();
+        if (isLocked(username, now)) throw invalidCredentials();
+        UserRow user = findRowByUsername(username);
         if (user == null || !user.enabled() || !passwordEncoder.matches(command.password(), user.passwordHash())) {
-            throw new BusinessException(HttpStatus.UNAUTHORIZED, "IP-AUTH-001", "用户名或密码错误");
+            if (user != null) recordFailedLogin(username, now);
+            throw invalidCredentials();
         }
+        failedLogins.remove(username);
         jdbcClient.sql("update ip_user set last_login_at = current_timestamp where id = :id")
                 .param("id", user.id()).update();
         UserPrincipal principal = user.principal();
@@ -162,7 +171,10 @@ public class UserService implements ApplicationRunner {
         UserRow user = requireRow(id);
         if (id == operatorId) throw new BusinessException(HttpStatus.BAD_REQUEST, "IP-USER-004", "不能删除当前登录账号");
         if ("ADMIN".equals(user.role())) requireAnotherAdmin(id);
-        jdbcClient.sql("delete from ip_user where id = :id").param("id", id).update();
+        jdbcClient.sql("""
+                update ip_user set enabled = false, token_version = token_version + 1,
+                       updated_at = current_timestamp where id = :id
+                """).param("id", id).update();
     }
 
     private void requireAnotherAdmin(long excludedId) {
@@ -218,11 +230,37 @@ public class UserService implements ApplicationRunner {
     }
 
     private void validatePassword(String password) {
-        if (password == null || password.length() < 8 || password.length() > 72
-                || password.chars().allMatch(Character::isLetter)
-                || password.chars().allMatch(Character::isDigit)) {
-            throw new BusinessException(HttpStatus.BAD_REQUEST, "IP-USER-008", "密码长度需为8-72位，且不能是纯字母或纯数字");
+        if (password == null || password.length() < 10 || password.length() > 72 || password.codePointCount(0, password.length()) != password.length()) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "IP-USER-008", "密码长度需为10-72位，并至少包含三类字符");
         }
+        int categories = 0;
+        if (password.chars().anyMatch(Character::isUpperCase)) categories++;
+        if (password.chars().anyMatch(Character::isLowerCase)) categories++;
+        if (password.chars().anyMatch(Character::isDigit)) categories++;
+        if (password.chars().anyMatch(value -> !Character.isLetterOrDigit(value))) categories++;
+        if (categories < 3) throw new BusinessException(HttpStatus.BAD_REQUEST, "IP-USER-008", "密码长度需为10-72位，并至少包含三类字符");
+    }
+
+    private boolean isLocked(String username, Instant now) {
+        LoginAttempt attempt = failedLogins.get(username);
+        if (attempt == null) return false;
+        if (attempt.lockedUntil() != null && attempt.lockedUntil().isAfter(now)) return true;
+        if (attempt.lockedUntil() != null || attempt.failedCount() > 0) failedLogins.remove(username, attempt);
+        return false;
+    }
+
+    private void recordFailedLogin(String username, Instant now) {
+        failedLogins.compute(username, (key, previous) -> {
+            int failures = previous == null || previous.lockedUntil() != null && !previous.lockedUntil().isAfter(now)
+                    ? 1 : previous.failedCount() + 1;
+            return failures >= MAX_FAILED_LOGIN_ATTEMPTS
+                    ? new LoginAttempt(failures, now.plus(LOGIN_LOCK_DURATION))
+                    : new LoginAttempt(failures, null);
+        });
+    }
+
+    private BusinessException invalidCredentials() {
+        return new BusinessException(HttpStatus.UNAUTHORIZED, "IP-AUTH-001", "用户名或密码错误");
     }
 
     private BusinessException notFound(long id) {
@@ -234,6 +272,8 @@ public class UserService implements ApplicationRunner {
                            LocalDateTime createdAt, LocalDateTime updatedAt) {
         UserPrincipal principal() { return new UserPrincipal(id, username, displayName, role, tokenVersion); }
     }
+
+    private record LoginAttempt(int failedCount, Instant lockedUntil) {}
 
     public record LoginCommand(@NotBlank String username, @NotBlank String password) {}
     public record LoginView(String accessToken, String tokenType, Instant expiresAt, UserView user) {}

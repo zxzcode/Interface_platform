@@ -29,6 +29,15 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     }
 
     @Override
+    protected boolean shouldNotFilter(HttpServletRequest request) {
+        String openApiPrefix = request.getContextPath() + "/open-api";
+        String requestUri = request.getRequestURI();
+        // Open APIs use AppKey/HMAC only. Treating a business Authorization header as a
+        // console JWT would bypass the gateway's authentication log and protocol.
+        return requestUri.equals(openApiPrefix) || requestUri.startsWith(openApiPrefix + "/");
+    }
+
+    @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
                                     FilterChain filterChain) throws ServletException, IOException {
         String authorization = request.getHeader("Authorization");

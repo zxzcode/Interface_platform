@@ -1,97 +1,63 @@
-# 开发指南
+# 开发与验证指南
 
-## 1. 环境要求
+## 1. 环境基线
 
-- JDK 17、Maven 3.9+
-- MySQL 8
-- 前端独立开发需要 Node.js 24.12+
+- 后端：Java 17、Maven 3.9+、MySQL 8。
+- 前端独立开发：Node.js 24.12+。
+- 当前终端默认的 JDK 8 不能用于该项目；不要直接使用默认 `mvn` 作为验收依据。
 
-完整构建会下载项目专用 Node.js，因此服务器只运行 JAR 时不需要安装 Node。
-
-## 2. 代码模块
-
-```text
-server/src/main/java/com/lzcer/interfaceplatform/
-├── common/             API 异常、凭证加密和日志脱敏
-├── interfacecatalog/   HTTP 接口配置 CRUD 与路由解析
-├── gateway/            开放入口、HTTP 转发和统一执行链路
-├── invocationlog/      调用日志写入、列表和详情
-├── datasource/         数据源 CRUD、凭证和动态连接池
-├── sqlquery/           SQL API、只读校验和参数化执行
-├── platform/           运行总览
-└── config/             SPA 路由配置
-```
-
-## 3. 配置方式
-
-默认激活 `local` 配置。开发机密码和加密密钥放在 Git 忽略的：
-
-```text
-config/application-local.yml
-```
-
-服务器推荐使用环境变量：
+项目统一构建入口会选择 Java 17：
 
 ```powershell
-$env:SPRING_PROFILES_ACTIVE = "prod"
-$env:PLATFORM_DB_URL = "jdbc:mysql://db-host:3306/interface_platform"
-$env:PLATFORM_DB_USERNAME = "interface_platform"
-$env:PLATFORM_DB_PASSWORD = "***"
-$env:PLATFORM_ENCRYPTION_KEY = "Base64编码的32字节随机密钥"
-```
-
-`PLATFORM_ENCRYPTION_KEY` 上线后不得随意更换，否则已有数据源凭证无法解密。生产库建议给平台单独账号，不使用 root。
-
-## 4. 本地开发
-
-一键构建并启动：
-
-```text
-双击 start-interface-platform.bat
-```
-
-BAT 会先调用 `build.py`，成功后调用 `statr.py`/`start.py`；没有 Python 时自动回退到 PowerShell。若已有接口平台进程占用 JAR 或 8080 端口，需要先停止旧进程。
-
-后端隔离测试使用 H2：
-
-```powershell
-mvn -pl server "-Dfrontend.skip=true" test
-```
-
-使用本地 MySQL 启动整包：
-
-```powershell
+Set-Location E:\Code\interface_platform
 .\scripts\build.ps1
+```
+
+如需单独执行 Maven，先显式将 `JAVA_HOME` 与 `PATH` 指向 Java 17，再执行相应命令。构建输出、日志、本地配置、密钥和数据均不得提交 Git。
+
+## 2. 本地安全配置
+
+`config/application-local.yml` 已被忽略，适合放本机 MySQL 地址与开发密钥。部署环境优先使用环境变量：
+
+```powershell
+$env:SPRING_PROFILES_ACTIVE = 'prod'
+$env:PLATFORM_DB_URL = 'jdbc:mysql://db-host:3306/interface_platform'
+$env:PLATFORM_DB_USERNAME = 'interface_platform'
+$env:PLATFORM_DB_PASSWORD = '<数据库密码>'
+$env:PLATFORM_ENCRYPTION_KEY = '<Base64 随机密钥>'
+$env:PLATFORM_JWT_KEY = '<独立的 Base64 随机密钥>'
+$env:PLATFORM_ADMIN_PASSWORD = '<首次启动时创建管理员使用>'
+```
+
+`PLATFORM_ADMIN_PASSWORD` 只在用户表为空时被使用；创建首位管理员后应从部署环境的常驻配置中移除或轮换。加密密钥变更会导致已存储的数据源凭证和 AppSecret 密文无法解密，变更前必须有密钥迁移方案。
+
+## 3. 开发运行
+
+```powershell
+# 全量构建（推荐，采用 Java 17）
+.\scripts\build.ps1
+
+# 启动已构建的单 JAR
 .\scripts\start.ps1
 ```
 
-前端热更新：
+桌面环境可使用根目录 `start-interface-platform.bat`。前端热更新需要在 `frontend` 目录安装依赖后执行 `npm run dev`，开发代理将 `/api` 与 `/open-api` 转发到 `http://localhost:8080`。
 
-```powershell
-cd frontend
-npm install
-npm run dev
-```
+## 4. 数据库迁移约束
 
-Vite 会把 `/api`、`/open-api` 代理到 `http://localhost:8080`。
+- 仅新增 Flyway 迁移文件。
+- 已发布的 `V1`、`V2` 以及已被环境执行的 `V3` 不得修改。
+- 当前 `V3__access_control.sql` 创建用户、调用方权限与 Nonce 防重放相关表；在新环境需确认迁移按版本顺序成功执行。
+- 真实业务数据源使用单独的只读账号；平台库账号与业务库账号不得混用。
 
-## 5. 关键安全边界
+## 5. 最小验证顺序
 
-- HTTP 目标 URL 只能由管理员配置，必须是 HTTP/HTTPS，不能包含用户信息和片段。
-- 转发不自动跟随重定向；过滤 Hop-by-Hop、Host、Content-Length 等请求头。
-- 请求和响应最大 1 MiB；日志正文最大 16000 字符并自动脱敏。
-- 数据源用户名和密码使用 AES-256-GCM 加密；运行池设置为只读，最大连接数 3。
-- SQL API 只允许单条 `SELECT`，参数使用 `:name` 预编译绑定。
-- SQL API 最大 5000 行、最大 60 秒，具体接口可配置更小限制。
+1. 使用 Java 17 运行后端测试。
+2. 运行前端 TypeScript 检查和生产构建；Node 版本不足时先升级，不把“未运行”标为通过。
+3. 启动单 JAR，设置首位管理员环境变量，完成登录和 `/api/auth/me`。
+4. 创建目标系统、HTTP 接口、只读数据源和 SQL API，并分别执行管理端测试。
+5. 创建调用方并完成权限配置（当前该页与后端契约待对齐）。
+6. 用 `scripts/call-open-api.ps1` 成功调用一次 HTTP 和一次 SQL；再验证过期时间戳、重复 Nonce、错误签名和未授权资源。
+7. 以 `X-Trace-Id` 查询日志，确认请求/响应摘要已脱敏且不含密码、JWT 或 AppSecret。
 
-## 6. 验证命令
-
-```powershell
-# 后端快速测试，不重复构建前端
-mvn -pl server "-Dfrontend.skip=true" test
-
-# 最终一体化构建
-.\scripts\build.ps1
-```
-
-上线前还应验证：目标系统白名单策略、AppKey 签名鉴权、权限、限流和压力测试。
+详细接口和 PowerShell 签名步骤见 [api-conventions.md](api-conventions.md)。完整发布核对项见 [release-acceptance-checklist.md](release-acceptance-checklist.md)。

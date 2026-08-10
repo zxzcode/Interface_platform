@@ -21,7 +21,7 @@ const router = createRouter({
     { path: '/clients', name: 'clients', component: () => import('@/views/ClientsView.vue'), meta: { title: '调用方管理', roles: ['ADMIN'] } },
     { path: '/users', name: 'users', component: () => import('@/views/UsersView.vue'), meta: { title: '用户管理', roles: ['ADMIN'] } },
     { path: '/guide', name: 'guide', component: () => import('@/views/InvocationGuideView.vue'), meta: { title: '调用指南' } },
-    { path: '/settings', name: 'settings', component: () => import('@/views/SettingsView.vue'), meta: { title: '系统设置', roles: ['ADMIN'] } },
+    { path: '/change-password', name: 'change-password', component: () => import('@/views/ChangePasswordView.vue'), meta: { title: '修改密码' } },
     { path: '/:pathMatch(.*)*', redirect: '/dashboard' },
   ],
 })

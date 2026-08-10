@@ -18,6 +18,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.UUID;
 
 @Service
 public class JwtTokenService {
@@ -57,6 +58,7 @@ public class JwtTokenService {
         claims.put("ver", principal.tokenVersion());
         claims.put("iat", issuedAt.getEpochSecond());
         claims.put("exp", expiresAt.getEpochSecond());
+        claims.put("jti", UUID.randomUUID().toString());
         String header = encode(Map.of("alg", "HS256", "typ", "JWT"));
         String payload = encode(claims);
         String content = header + "." + payload;
@@ -70,10 +72,18 @@ public class JwtTokenService {
             byte[] expected = sign(parts[0] + "." + parts[1]);
             byte[] supplied = DECODER.decode(parts[2]);
             if (!MessageDigest.isEqual(expected, supplied)) throw invalidToken();
+            Map<String, Object> header = objectMapper.readValue(DECODER.decode(parts[0]), new TypeReference<>() {});
+            if (!"HS256".equals(header.get("alg")) || !"JWT".equals(header.get("typ"))) throw invalidToken();
             Map<String, Object> claims = objectMapper.readValue(DECODER.decode(parts[1]), new TypeReference<>() {});
             long expiresAt = number(claims.get("exp"));
             if (Instant.now().getEpochSecond() >= expiresAt) {
                 throw new BusinessException(HttpStatus.UNAUTHORIZED, "IP-AUTH-003", "登录状态已过期");
+            }
+            long issuedAt = number(claims.get("iat"));
+            long now = Instant.now().getEpochSecond();
+            if (issuedAt > now + 60 || issuedAt >= expiresAt || number(claims.get("uid")) <= 0
+                    || number(claims.get("ver")) < 1 || string(claims.get("jti")).length() > 100) {
+                throw invalidToken();
             }
             return new JwtClaims(number(claims.get("uid")), string(claims.get("sub")),
                     string(claims.get("name")), string(claims.get("role")), number(claims.get("ver")), expiresAt);

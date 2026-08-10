@@ -32,7 +32,7 @@ public class ExternalApiAuthService {
                                   @Value("${platform.security.signature-skew-seconds:300}") long allowedSkewSeconds) {
         this.clientService = clientService;
         this.jdbcClient = jdbcClient;
-        this.allowedSkewSeconds = Math.max(30, allowedSkewSeconds);
+        this.allowedSkewSeconds = Math.min(3600, Math.max(30, allowedSkewSeconds));
     }
 
     @Transactional
@@ -40,30 +40,38 @@ public class ExternalApiAuthService {
         String appKey = requiredHeader(request.headers(), "x-app-key");
         String timestampText = requiredHeader(request.headers(), "x-timestamp");
         String nonce = requiredHeader(request.headers(), "x-nonce");
-        String signature = requiredHeader(request.headers(), "x-signature").toLowerCase(Locale.ROOT);
-        if (!nonce.matches("[A-Za-z0-9._-]{8,100}")) throw unauthorized("IP-SIGN-002", "Nonce 格式无效");
+        String signature = requiredHeader(request.headers(), "x-signature");
+        if (!nonce.matches("[A-Za-z0-9_-]{16,64}")) throw unauthorized("IP-SIGN-002", "Nonce 格式无效");
+        if (!signature.matches("[0-9a-f]{64}")) throw unauthorized("IP-SIGN-006", "请求签名无效");
+
+        ApiClientService.AuthenticatedClient client = clientService.findEnabledByAppKey(appKey);
+        if (client == null) throw unauthorized("IP-SIGN-005", "调用方凭证无效");
 
         long timestamp;
         try { timestamp = Long.parseLong(timestampText); }
         catch (NumberFormatException exception) { throw unauthorized("IP-SIGN-003", "时间戳格式无效"); }
-        long delta = Math.abs(Instant.now().toEpochMilli() - timestamp);
+        Instant now = Instant.now();
+        long delta;
+        try {
+            delta = Math.abs(Math.subtractExact(now.toEpochMilli(), timestamp));
+        } catch (ArithmeticException exception) {
+            throw unauthorized("IP-SIGN-004", "请求时间戳已过期");
+        }
         if (delta > allowedSkewSeconds * 1000) throw unauthorized("IP-SIGN-004", "请求时间戳已过期");
 
-        ApiClientService.AuthenticatedClient client = clientService.findEnabledByAppKey(appKey);
-        if (client == null) throw unauthorized("IP-SIGN-005", "调用方凭证无效");
         String canonical = canonical(request, timestampText, nonce);
         String expected = hmac(client.appSecret(), canonical);
         if (!MessageDigest.isEqual(expected.getBytes(StandardCharsets.US_ASCII), signature.getBytes(StandardCharsets.US_ASCII))) {
             throw unauthorized("IP-SIGN-006", "请求签名无效");
         }
 
-        jdbcClient.sql("delete from ip_api_nonce where expires_at < current_timestamp").update();
+        jdbcClient.sql("delete from ip_api_nonce where expires_at <= current_timestamp").update();
         try {
             jdbcClient.sql("""
                     insert into ip_api_nonce(client_id, nonce_value, expires_at)
                     values (:clientId, :nonce, :expiresAt)
                     """).param("clientId", client.id()).param("nonce", nonce)
-                    .param("expiresAt", Timestamp.from(Instant.now().plusSeconds(allowedSkewSeconds * 2))).update();
+                    .param("expiresAt", Timestamp.from(now.plusSeconds(allowedSkewSeconds * 2))).update();
         } catch (DataIntegrityViolationException exception) {
             throw unauthorized("IP-SIGN-007", "请求 Nonce 已使用，禁止重放");
         }
@@ -78,8 +86,12 @@ public class ExternalApiAuthService {
 
     public String canonical(GatewayService.GatewayRequest request, String timestamp, String nonce) {
         return request.method().toUpperCase(Locale.ROOT) + "\n" + request.path() + "\n"
-                + (request.rawQuery() == null ? "" : request.rawQuery()) + "\n" + timestamp + "\n" + nonce + "\n"
+                + canonicalQuery(request.rawQuery()) + "\n" + timestamp + "\n" + nonce + "\n"
                 + sha256(request.body());
+    }
+
+    private String canonicalQuery(String rawQuery) {
+        return rawQuery == null ? "" : rawQuery;
     }
 
     private String hmac(String secret, String content) {
@@ -101,9 +113,11 @@ public class ExternalApiAuthService {
     }
 
     private String requiredHeader(Map<String, List<String>> headers, String name) {
-        return headers.entrySet().stream().filter(entry -> entry.getKey().equalsIgnoreCase(name))
+        List<String> values = headers.entrySet().stream().filter(entry -> entry.getKey().equalsIgnoreCase(name))
                 .flatMap(entry -> entry.getValue().stream()).filter(value -> value != null && !value.isBlank())
-                .findFirst().orElseThrow(() -> unauthorized("IP-SIGN-001", "缺少鉴权请求头: " + name));
+                .toList();
+        if (values.size() != 1) throw unauthorized("IP-SIGN-001", "鉴权请求头必须且只能传递一次: " + name);
+        return values.get(0);
     }
 
     private BusinessException unauthorized(String code, String message) {

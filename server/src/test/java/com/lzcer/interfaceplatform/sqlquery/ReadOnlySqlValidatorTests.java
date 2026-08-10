@@ -27,4 +27,18 @@ class ReadOnlySqlValidatorTests {
         assertThatThrownBy(() -> validator.validate("select * from inventory -- bypass"))
                 .isInstanceOf(BusinessException.class);
     }
+
+    @Test
+    void permitsOneSelectWithATrailingSemicolonButRejectsReadBypassSyntax() {
+        ReadOnlySqlValidator.ValidatedSql result = validator.validate(
+                "select sku from inventory where warehouse_id = :warehouseId;");
+
+        assertThat(result.sql()).isEqualTo("select sku from inventory where warehouse_id = :warehouseId");
+        assertThatThrownBy(() -> validator.validate("select * from inventory for update"))
+                .isInstanceOf(BusinessException.class);
+        assertThatThrownBy(() -> validator.validate("select * from inventory into outfile '/tmp/export.csv'"))
+                .isInstanceOf(BusinessException.class);
+        assertThatThrownBy(() -> validator.validate("with inventory as (select * from stock) select * from inventory"))
+                .isInstanceOf(BusinessException.class);
+    }
 }

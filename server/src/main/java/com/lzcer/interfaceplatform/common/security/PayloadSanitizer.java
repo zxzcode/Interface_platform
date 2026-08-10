@@ -23,8 +23,11 @@ public class PayloadSanitizer {
             "authorization", "proxy-authorization", "cookie", "set-cookie", "x-api-key", "x-app-secret",
             "x-signature"
     );
+    private static final Pattern SENSITIVE_HEADER = Pattern.compile(
+            "(?i).*(authorization|cookie|password|secret|token|api[-_]?key).*"
+    );
     private static final Pattern SENSITIVE_FIELD = Pattern.compile(
-            "(?i).*(password|passwd|secret|token|authorization|idcard|identity|bankcard|phone|mobile).*"
+            "(?i).*(password|passwd|secret|token|authorization|api[_-]?key|id[_-]?(card|no|number)|identity|bank[_-]?(card|account)|phone|mobile).*"
     );
     private static final Pattern TEXT_SECRET = Pattern.compile(
             "(?i)(password|passwd|secret|token|authorization|mobile|phone)(\\s*[=:]\\s*)([^,;\\s&]+)"
@@ -36,13 +39,14 @@ public class PayloadSanitizer {
     public PayloadSanitizer(ObjectMapper objectMapper,
                             @Value("${platform.forward.max-log-summary-chars:16000}") int maxChars) {
         this.objectMapper = objectMapper;
-        this.maxChars = maxChars;
+        this.maxChars = Math.max(256, maxChars);
     }
 
     public String sanitizeHeaders(Map<String, List<String>> headers) {
         Map<String, Object> safe = new LinkedHashMap<>();
         headers.forEach((name, values) -> safe.put(name,
-                SENSITIVE_HEADERS.contains(name.toLowerCase(Locale.ROOT)) ? "******" : values));
+                SENSITIVE_HEADERS.contains(name.toLowerCase(Locale.ROOT)) || SENSITIVE_HEADER.matcher(name).matches()
+                        ? "******" : values));
         try {
             return truncate(objectMapper.writeValueAsString(safe));
         } catch (JacksonException exception) {
@@ -59,15 +63,17 @@ public class PayloadSanitizer {
             return "[binary content omitted, " + body.length + " bytes]";
         }
         String text = new String(body, StandardCharsets.UTF_8);
-        if (normalizedType.contains("json") || text.stripLeading().startsWith("{") || text.stripLeading().startsWith("[")) {
+        boolean json = normalizedType.contains("json") || text.stripLeading().startsWith("{") || text.stripLeading().startsWith("[");
+        if (json) {
             try {
                 JsonNode node = objectMapper.readTree(text);
                 redact(node);
                 return truncate(objectMapper.writeValueAsString(node));
             } catch (JacksonException ignored) {
-                // Fall back to conservative text redaction for malformed JSON.
+                return "[malformed JSON content omitted]";
             }
         }
+        if (normalizedType.contains("xml") || text.stripLeading().startsWith("<")) return "[XML content omitted]";
         return truncate(TEXT_SECRET.matcher(text).replaceAll("$1$2******"));
     }
 

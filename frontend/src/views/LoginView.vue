@@ -58,7 +58,7 @@ async function submit(): Promise<void> {
             <el-input v-model.trim="form.username" :prefix-icon="User" size="large" autocomplete="username" placeholder="请输入用户名" />
           </el-form-item>
           <el-form-item label="密码" prop="password">
-            <el-input v-model="form.password" :prefix-icon="Lock" size="large" type="password" show-password autocomplete="current-password" placeholder="请输入密码" />
+            <el-input v-model="form.password" :prefix-icon="Lock" size="large" type="password" autocomplete="current-password" placeholder="请输入密码" />
           </el-form-item>
           <el-button class="login-submit" type="primary" size="large" :loading="submitting" @click="submit">登录平台</el-button>
         </el-form>

@@ -4,6 +4,7 @@ import com.lzcer.interfaceplatform.common.api.BusinessException;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import org.springframework.http.HttpStatus;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -53,6 +54,7 @@ public class SystemService {
     public SystemView update(long id, SystemCommand command) {
         get(id);
         Validated value = validate(command);
+        ensureReferencedTargetsRemainAllowed(id, value.baseUrl());
         jdbcClient.sql("""
                 update ip_system set system_code = :code, system_name = :name, base_url = :baseUrl,
                        health_status = :status, updated_at = current_timestamp where id = :id
@@ -63,8 +65,12 @@ public class SystemService {
 
     @Transactional
     public void delete(long id) {
-        int changed = jdbcClient.sql("delete from ip_system where id = :id").param("id", id).update();
-        if (changed == 0) throw notFound(id);
+        try {
+            int changed = jdbcClient.sql("delete from ip_system where id = :id").param("id", id).update();
+            if (changed == 0) throw notFound(id);
+        } catch (DataIntegrityViolationException exception) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "IP-SYSTEM-004", "被接口引用的系统档案不能删除");
+        }
     }
 
     private Validated validate(SystemCommand command) {
@@ -77,12 +83,62 @@ public class SystemService {
             URI uri = new URI(baseUrl);
             if (!("http".equalsIgnoreCase(uri.getScheme()) || "https".equalsIgnoreCase(uri.getScheme()))
                     || uri.getHost() == null || uri.getUserInfo() != null || uri.getFragment() != null
-                    || uri.getQuery() != null) throw new URISyntaxException(baseUrl, "invalid base url");
+                    || uri.getQuery() != null || containsEncodedPathControl(uri.getRawPath())) {
+                throw new URISyntaxException(baseUrl, "invalid base url");
+            }
         } catch (URISyntaxException exception) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "IP-SYSTEM-003", "基础地址必须是无账号、查询串和片段的 HTTP/HTTPS 地址");
         }
         while (baseUrl.endsWith("/")) baseUrl = baseUrl.substring(0, baseUrl.length() - 1);
         return new Validated(code, command.name().strip(), baseUrl, status);
+    }
+
+    private void ensureReferencedTargetsRemainAllowed(long systemId, String baseUrl) {
+        URI base = URI.create(baseUrl);
+        List<String> targets = jdbcClient.sql("select target_url from ip_interface where target_system_id = :id")
+                .param("id", systemId).query(String.class).list();
+        for (String targetUrl : targets) {
+            try {
+                URI target = URI.create(targetUrl);
+                if (!sameOrigin(target, base) || !isWithinBasePath(target, base)) {
+                    throw new BusinessException(HttpStatus.BAD_REQUEST, "IP-SYSTEM-005",
+                            "已引用接口的目标地址不在新的系统基础地址白名单范围内");
+                }
+            } catch (IllegalArgumentException exception) {
+                throw new BusinessException(HttpStatus.BAD_REQUEST, "IP-SYSTEM-005",
+                        "已引用接口的目标地址不在新的系统基础地址白名单范围内");
+            }
+        }
+    }
+
+    private boolean sameOrigin(URI target, URI base) {
+        return target.getScheme() != null && target.getScheme().equalsIgnoreCase(base.getScheme())
+                && target.getHost() != null && target.getHost().equalsIgnoreCase(base.getHost())
+                && effectivePort(target) == effectivePort(base);
+    }
+
+    private boolean isWithinBasePath(URI target, URI base) {
+        String targetPath = normalizedPath(target.getRawPath());
+        String basePath = normalizedPath(base.getRawPath());
+        return !containsEncodedPathControl(targetPath) && !containsEncodedPathControl(basePath)
+                && ("/".equals(basePath) || targetPath.equals(basePath) || targetPath.startsWith(basePath + "/"));
+    }
+
+    private int effectivePort(URI uri) {
+        if (uri.getPort() >= 0) return uri.getPort();
+        return "https".equalsIgnoreCase(uri.getScheme()) ? 443 : 80;
+    }
+
+    private String normalizedPath(String path) {
+        if (path == null || path.isBlank()) return "/";
+        String value = path.endsWith("/") && path.length() > 1 ? path.substring(0, path.length() - 1) : path;
+        return value.startsWith("/") ? value : "/" + value;
+    }
+
+    private boolean containsEncodedPathControl(String path) {
+        String value = path == null ? "" : path.toLowerCase(Locale.ROOT);
+        return value.contains("/../") || value.endsWith("/..") || value.contains("/./") || value.endsWith("/.")
+                || value.contains("%2e") || value.contains("%2f") || value.contains("%5c") || value.contains("\\");
     }
 
     private static SystemView map(ResultSet rs, int rowNum) throws SQLException {

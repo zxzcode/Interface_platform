@@ -17,7 +17,7 @@ const filtered = computed(() => systems.value.filter(item => !keyword.value
   || `${item.code}${item.name}${item.baseUrl ?? ''}`.toLowerCase().includes(keyword.value.toLowerCase())))
 
 function emptyForm(): SystemCommand {
-  return { code: '', name: '', baseUrl: '', status: 'UNKNOWN', description: '' }
+  return { code: '', name: '', baseUrl: '', status: 'UNKNOWN' }
 }
 
 async function load(): Promise<void> {
@@ -35,16 +35,16 @@ function openCreate(): void {
 
 function openEdit(row: SystemOption): void {
   editingId.value = row.id
-  Object.assign(form, { code: row.code, name: row.name, baseUrl: row.baseUrl ?? '', status: row.status, description: row.description ?? '' })
+  Object.assign(form, { code: row.code, name: row.name, baseUrl: row.baseUrl, status: row.status })
   dialogVisible.value = true
 }
 
 async function save(): Promise<void> {
-  if (!form.code || !form.name) {
-    ElMessage.warning('请填写系统名称和编码')
+  if (!form.code || !form.name || !form.baseUrl) {
+    ElMessage.warning('请填写系统名称、编码和基础地址')
     return
   }
-  if (form.baseUrl && !/^https?:\/\//i.test(form.baseUrl)) {
+  if (!/^https?:\/\//i.test(form.baseUrl)) {
     ElMessage.warning('基础地址必须以 http:// 或 https:// 开头')
     return
   }
@@ -85,7 +85,6 @@ onMounted(load)
         <el-table-column label="系统" min-width="220"><template #default="scope"><div class="primary-cell"><div class="system-symbol">{{ scope.row.code.slice(0, 2) }}</div><div><strong>{{ scope.row.name }}</strong><small>{{ scope.row.code }}</small></div></div></template></el-table-column>
         <el-table-column label="基础地址" min-width="300"><template #default="scope"><code class="path-code break-value">{{ scope.row.baseUrl || '未配置' }}</code></template></el-table-column>
         <el-table-column label="连接状态" width="130"><template #default="scope"><StatusBadge :status="scope.row.status" /></template></el-table-column>
-        <el-table-column prop="description" label="说明" min-width="180" show-overflow-tooltip />
         <el-table-column label="操作" width="150" fixed="right"><template #default="scope"><el-button :icon="Edit" link type="primary" @click="openEdit(scope.row)">编辑</el-button><el-button :icon="Delete" link type="danger" @click="remove(scope.row)">删除</el-button></template></el-table-column>
       </el-table>
     </section>
@@ -93,9 +92,8 @@ onMounted(load)
     <el-dialog v-model="dialogVisible" :title="editingId ? '编辑系统' : '新增系统'" width="650px" destroy-on-close>
       <el-form label-position="top" class="dialog-form">
         <div class="form-grid"><el-form-item label="系统名称" required><el-input v-model.trim="form.name" placeholder="例如：SAP ERP" /></el-form-item><el-form-item label="系统编码" required><el-input v-model.trim="form.code" :disabled="Boolean(editingId)" placeholder="SAP" /></el-form-item></div>
-        <el-form-item label="基础地址"><el-input v-model.trim="form.baseUrl" placeholder="http://sap.internal:8000" /><small class="field-tip">填写协议、主机和端口，不建议包含具体接口路径</small></el-form-item>
+        <el-form-item label="基础地址" required><el-input v-model.trim="form.baseUrl" placeholder="http://sap.internal:8000" /><small class="field-tip">填写协议、主机和端口，不建议包含具体接口路径</small></el-form-item>
         <el-form-item label="当前状态"><el-select v-model="form.status" style="width:100%"><el-option label="待检测" value="UNKNOWN" /><el-option label="运行正常" value="ONLINE" /><el-option label="性能波动" value="DEGRADED" /><el-option label="离线" value="OFFLINE" /></el-select></el-form-item>
-        <el-form-item label="说明"><el-input v-model="form.description" type="textarea" :rows="3" /></el-form-item>
       </el-form>
       <template #footer><el-button @click="dialogVisible=false">取消</el-button><el-button type="primary" :loading="saving" @click="save">保存系统</el-button></template>
     </el-dialog>

@@ -5,10 +5,12 @@ import { ElMessage } from 'element-plus'
 import PageHeader from '@/components/PageHeader.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
 import { platformApi, type DashboardSummary, type InvocationLog } from '@/api/platform'
+import { useAuthStore } from '@/stores/auth'
 
 const loading = ref(true)
 const dashboard = ref<DashboardSummary>()
 const recentLogs = ref<InvocationLog[]>([])
+const auth = useAuthStore()
 
 const maxCalls = computed(() => Math.max(...(dashboard.value?.trend.map((item) => item.total) ?? [1])))
 
@@ -39,7 +41,7 @@ onMounted(load)
   <div v-loading="loading" class="view-stack">
     <PageHeader eyebrow="OPERATIONS CENTER" title="运行总览" description="集中查看跨系统接口调用、链路健康状态与异常趋势。">
       <el-button :icon="Refresh" @click="load">刷新数据</el-button>
-      <el-button type="primary" :icon="Connection" @click="$router.push('/interfaces')">管理接口</el-button>
+      <el-button v-if="auth.canOperate" type="primary" :icon="Connection" @click="$router.push('/interfaces')">管理接口</el-button>
     </PageHeader>
 
     <section class="metric-grid">
@@ -105,4 +107,3 @@ onMounted(load)
     </section>
   </div>
 </template>
-

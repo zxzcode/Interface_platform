@@ -27,7 +27,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   async function login(command: LoginCommand): Promise<UserAccount> {
     const result = await platformApi.login(command)
-    acceptToken(result.token)
+    acceptToken(result.accessToken)
     user.value = result.user
     initialized = true
     return result.user
@@ -57,4 +57,3 @@ export const useAuthStore = defineStore('auth', () => {
 
   return { token, user, authenticated, role, isAdmin, canOperate, initializing, login, initialize, logout, clearSession }
 })
-

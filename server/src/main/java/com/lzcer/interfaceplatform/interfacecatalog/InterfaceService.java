@@ -121,20 +121,25 @@ public class InterfaceService {
 
     @Transactional
     public void delete(long id) {
+        String code = jdbcClient.sql("select interface_code from ip_interface where id = :id")
+                .param("id", id).query(String.class).optional().orElseThrow(() -> notFound(id));
         int deleted = jdbcClient.sql("delete from ip_interface where id = :id").param("id", id).update();
         if (deleted == 0) throw notFound(id);
+        jdbcClient.sql("delete from ip_client_permission where route_type = 'HTTP' and resource_code = :code")
+                .param("code", code).update();
     }
 
     public Optional<RouteConfig> resolve(String path, String method) {
         return jdbcClient.sql("""
                 select i.id, i.interface_code, i.interface_name, i.target_url, i.http_method, i.interface_path,
-                       i.connect_timeout_ms, i.read_timeout_ms, target_system.system_name as target_system
+                       i.connect_timeout_ms, i.read_timeout_ms, target_system.system_name as target_system,
+                       target_system.health_status as target_status
                   from ip_interface i
                   join ip_system target_system on target_system.id = i.target_system_id
                  where i.interface_path = :path and i.http_method = :method and i.enabled = true
                 """).param("path", path).param("method", method.toUpperCase(Locale.ROOT))
                 .query((rs, rowNum) -> new RouteConfig(rs.getLong("id"), rs.getString("interface_code"),
-                        rs.getString("interface_name"), rs.getString("target_system"),
+                        rs.getString("interface_name"), rs.getString("target_system"), rs.getString("target_status"),
                         URI.create(rs.getString("target_url")), rs.getInt("connect_timeout_ms"),
                         rs.getInt("read_timeout_ms"), rs.getString("http_method"), rs.getString("interface_path")))
                 .optional();
@@ -143,12 +148,13 @@ public class InterfaceService {
     public RouteConfig runtimeConfig(long id) {
         return jdbcClient.sql("""
                 select i.id, i.interface_code, i.interface_name, i.target_url, i.http_method, i.interface_path,
-                       i.connect_timeout_ms, i.read_timeout_ms, target_system.system_name as target_system
+                       i.connect_timeout_ms, i.read_timeout_ms, target_system.system_name as target_system,
+                       target_system.health_status as target_status
                   from ip_interface i join ip_system target_system on target_system.id = i.target_system_id
                  where i.id = :id
                 """).param("id", id).query((rs, rowNum) -> new RouteConfig(rs.getLong("id"),
                         rs.getString("interface_code"), rs.getString("interface_name"),
-                        rs.getString("target_system"), URI.create(rs.getString("target_url")),
+                        rs.getString("target_system"), rs.getString("target_status"), URI.create(rs.getString("target_url")),
                         rs.getInt("connect_timeout_ms"), rs.getInt("read_timeout_ms"),
                         rs.getString("http_method"), rs.getString("interface_path")))
                 .optional().orElseThrow(() -> notFound(id));
@@ -202,7 +208,8 @@ public class InterfaceService {
             URI uri = new URI(value);
             URI base = new URI(baseUrl);
             if (!("http".equalsIgnoreCase(uri.getScheme()) || "https".equalsIgnoreCase(uri.getScheme()))
-                    || uri.getHost() == null || uri.getUserInfo() != null || uri.getFragment() != null) {
+                    || uri.getHost() == null || uri.getUserInfo() != null || uri.getFragment() != null
+                    || uri.getQuery() != null || !isWithinBasePath(uri, base)) {
                 throw new URISyntaxException(value, "target URL is not allowed");
             }
             if (!uri.getScheme().equalsIgnoreCase(base.getScheme())
@@ -222,6 +229,25 @@ public class InterfaceService {
     private int effectivePort(URI uri) {
         if (uri.getPort() >= 0) return uri.getPort();
         return "https".equalsIgnoreCase(uri.getScheme()) ? 443 : 80;
+    }
+
+    private boolean isWithinBasePath(URI target, URI base) {
+        String targetPath = normalizedPath(target.getRawPath());
+        String basePath = normalizedPath(base.getRawPath());
+        if (containsEncodedPathControl(targetPath) || containsEncodedPathControl(basePath)) return false;
+        return "/".equals(basePath) || targetPath.equals(basePath) || targetPath.startsWith(basePath + "/");
+    }
+
+    private String normalizedPath(String path) {
+        if (path == null || path.isBlank()) return "/";
+        String value = path.endsWith("/") && path.length() > 1 ? path.substring(0, path.length() - 1) : path;
+        return value.startsWith("/") ? value : "/" + value;
+    }
+
+    private boolean containsEncodedPathControl(String path) {
+        String value = path.toLowerCase(Locale.ROOT);
+        return value.contains("/../") || value.endsWith("/..") || value.contains("/./") || value.endsWith("/.")
+                || value.contains("%2e") || value.contains("%2f") || value.contains("%5c") || value.contains("\\");
     }
 
     private String blankToNull(String value) {
@@ -265,8 +291,12 @@ public class InterfaceService {
 
     public record SystemOption(long id, String code, String name, String baseUrl, String status) {}
 
-    public record RouteConfig(long id, String code, String name, String targetSystem, URI targetUrl,
-                              int connectTimeoutMs, int readTimeoutMs, String method, String path) {}
+    public record RouteConfig(long id, String code, String name, String targetSystem, String targetStatus, URI targetUrl,
+                              int connectTimeoutMs, int readTimeoutMs, String method, String path) {
+        public boolean targetAvailable() {
+            return !"OFFLINE".equalsIgnoreCase(targetStatus);
+        }
+    }
 
     private record ValidatedCommand(String code, String name, String description, long sourceSystemId,
                                     long targetSystemId, String method, String path, String targetUrl,

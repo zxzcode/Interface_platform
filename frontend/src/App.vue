@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   Bell, Coin, Connection, DataAnalysis, DataLine, Document, Expand, Fold, Guide, Key,
-  Monitor, Setting, SwitchButton, UserFilled,
+  Monitor, SwitchButton, UserFilled,
 } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import type { PlatformRole } from '@/api/platform'
@@ -25,7 +25,6 @@ const menu: Array<{ path: string; label: string; caption: string; icon: typeof D
   { path: '/clients', label: '调用方管理', caption: 'App credentials', icon: Key, roles: ['ADMIN'] },
   { path: '/users', label: '用户管理', caption: 'Access control', icon: UserFilled, roles: ['ADMIN'] },
   { path: '/guide', label: '调用指南', caption: 'Integration guide', icon: Guide },
-  { path: '/settings', label: '系统设置', caption: 'Administration', icon: Setting, roles: ['ADMIN'] },
 ]
 
 const visibleMenu = computed(() => menu.filter(item => !item.roles || (auth.role && item.roles.includes(auth.role))))
@@ -87,7 +86,7 @@ onBeforeUnmount(() => window.removeEventListener('auth:unauthorized', handleUnau
           <button class="icon-button" type="button" aria-label="通知"><el-icon><Bell /></el-icon></button>
           <el-dropdown trigger="click">
             <div class="user-block" tabindex="0"><div class="avatar">{{ avatarText }}</div><div><strong>{{ displayName }}</strong><small>{{ roleLabel }}</small></div></div>
-            <template #dropdown><el-dropdown-menu><el-dropdown-item disabled>{{ auth.user?.username }}</el-dropdown-item><el-dropdown-item :icon="SwitchButton" divided @click="logout">退出登录</el-dropdown-item></el-dropdown-menu></template>
+            <template #dropdown><el-dropdown-menu><el-dropdown-item disabled>{{ auth.user?.username }}</el-dropdown-item><el-dropdown-item :icon="UserFilled" @click="router.push('/change-password')">修改密码</el-dropdown-item><el-dropdown-item :icon="SwitchButton" divided @click="logout">退出登录</el-dropdown-item></el-dropdown-menu></template>
           </el-dropdown>
         </div>
       </header>

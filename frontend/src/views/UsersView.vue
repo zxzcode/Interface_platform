@@ -1,26 +1,31 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { Delete, Edit, Plus, Search, UserFilled } from '@element-plus/icons-vue'
+import { Delete, Edit, Key, Plus, Search, UserFilled } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { useRouter } from 'vue-router'
 import PageHeader from '@/components/PageHeader.vue'
-import { platformApi, type PlatformRole, type UserAccount, type UserCommand } from '@/api/platform'
+import { platformApi, type PlatformRole, type UserAccount } from '@/api/platform'
 import { useAuthStore } from '@/stores/auth'
 
 const auth = useAuthStore()
+const router = useRouter()
 const loading = ref(false)
 const saving = ref(false)
 const keyword = ref('')
 const users = ref<UserAccount[]>([])
 const dialogVisible = ref(false)
 const editingId = ref<number>()
-const form = reactive<UserCommand>(emptyForm())
+const form = reactive<UserForm>(emptyForm())
+const initialPassword = ref('')
 
 const filtered = computed(() => users.value.filter(item => !keyword.value
   || `${item.username}${item.displayName}`.toLowerCase().includes(keyword.value.toLowerCase())))
 const roleLabels: Record<PlatformRole, string> = { ADMIN: '系统管理员', OPERATOR: '运维人员', VIEWER: '只读用户' }
 
-function emptyForm(): UserCommand {
-  return { username: '', displayName: '', role: 'VIEWER', enabled: true, password: '' }
+interface UserForm { username: string; displayName: string; role: PlatformRole; enabled: boolean }
+
+function emptyForm(): UserForm {
+  return { username: '', displayName: '', role: 'VIEWER', enabled: true }
 }
 
 async function load(): Promise<void> {
@@ -33,34 +38,67 @@ async function load(): Promise<void> {
 function openCreate(): void {
   editingId.value = undefined
   Object.assign(form, emptyForm())
+  initialPassword.value = ''
   dialogVisible.value = true
 }
 
 function openEdit(row: UserAccount): void {
   editingId.value = row.id
-  Object.assign(form, { username: row.username, displayName: row.displayName, role: row.role, enabled: row.enabled, password: '' })
+  Object.assign(form, { username: row.username, displayName: row.displayName, role: row.role, enabled: row.enabled })
+  initialPassword.value = ''
   dialogVisible.value = true
 }
 
 async function save(): Promise<void> {
-  if (!form.username || !form.displayName || (!editingId.value && !form.password)) {
+  if (!form.username || !form.displayName || (!editingId.value && !initialPassword.value)) {
     ElMessage.warning('请完整填写用户信息和初始密码')
     return
   }
-  if (form.password && form.password.length < 8) {
-    ElMessage.warning('密码至少 8 位')
+  if (!editingId.value && !isValidPassword(initialPassword.value)) {
+    ElMessage.warning('密码需为 8-72 位，且不能是纯字母或纯数字')
     return
   }
   saving.value = true
   try {
-    const command: UserCommand = { ...form, password: form.password || undefined }
-    if (editingId.value) await platformApi.updateUser(editingId.value, command)
-    else await platformApi.createUser(command)
+    if (editingId.value) {
+      await platformApi.updateUser(editingId.value, { displayName: form.displayName, role: form.role, enabled: form.enabled })
+      if (editingId.value === auth.user?.id) {
+        auth.clearSession()
+        ElMessage.success('个人资料已更新，请重新登录')
+        dialogVisible.value = false
+        await router.replace('/login')
+        return
+      }
+    } else {
+      await platformApi.createUser({ ...form, password: initialPassword.value })
+    }
     ElMessage.success(editingId.value ? '用户已更新' : '用户已创建')
     dialogVisible.value = false
     await load()
   } catch (error) { ElMessage.error(error instanceof Error ? error.message : '用户保存失败') }
   finally { saving.value = false }
+}
+
+function isValidPassword(value: string): boolean {
+  return value.length >= 8 && value.length <= 72 && !/^[A-Za-z]+$/.test(value) && !/^\d+$/.test(value)
+}
+
+async function resetPassword(row: UserAccount): Promise<void> {
+  if (row.id === auth.user?.id) {
+    await router.push('/change-password')
+    return
+  }
+  try {
+    const result = await ElMessageBox.prompt(`为“${row.displayName}”设置新密码。`, '重置密码', {
+      inputType: 'password', inputPlaceholder: '8-72 位，不能为纯字母或纯数字',
+      inputValidator: value => isValidPassword(value) || '密码需为 8-72 位，且不能是纯字母或纯数字',
+      confirmButtonText: '确认重置', cancelButtonText: '取消', type: 'warning',
+    })
+    await platformApi.resetUserPassword(row.id, { password: result.value })
+    ElMessage.success('密码已重置，原登录 Token 已失效')
+  } catch (error) {
+    if (error !== 'cancel' && error !== 'close') ElMessage.error(error instanceof Error ? error.message : '密码重置失败')
+  }
 }
 
 async function remove(row: UserAccount): Promise<void> {
@@ -104,15 +142,15 @@ onMounted(load)
         <el-table-column label="角色" width="150"><template #default="scope"><el-tag effect="plain">{{ roleLabels[scope.row.role as PlatformRole] }}</el-tag></template></el-table-column>
         <el-table-column label="状态" width="110"><template #default="scope"><span class="text-status" :class="scope.row.enabled ? 'is-enabled' : 'is-disabled'">{{ scope.row.enabled ? '● 已启用' : '○ 已停用' }}</span></template></el-table-column>
         <el-table-column label="最近登录" min-width="180"><template #default="scope">{{ scope.row.lastLoginAt ? new Date(scope.row.lastLoginAt).toLocaleString('zh-CN', { hour12: false }) : '尚未登录' }}</template></el-table-column>
-        <el-table-column label="操作" width="150" fixed="right"><template #default="scope"><el-button :icon="Edit" link type="primary" @click="openEdit(scope.row)">编辑</el-button><el-button :icon="Delete" link type="danger" :disabled="scope.row.id === auth.user?.id" @click="remove(scope.row)">删除</el-button></template></el-table-column>
+        <el-table-column label="操作" width="220" fixed="right"><template #default="scope"><el-button :icon="Edit" link type="primary" @click="openEdit(scope.row)">编辑</el-button><el-button :icon="Key" link @click="resetPassword(scope.row)">{{ scope.row.id === auth.user?.id ? '修改密码' : '重置密码' }}</el-button><el-button :icon="Delete" link type="danger" :disabled="scope.row.id === auth.user?.id" @click="remove(scope.row)">删除</el-button></template></el-table-column>
       </el-table>
     </section>
 
     <el-dialog v-model="dialogVisible" :title="editingId ? '编辑用户' : '新增用户'" width="620px" destroy-on-close>
       <el-form label-position="top" class="dialog-form">
         <div class="form-grid"><el-form-item label="用户名" required><el-input v-model.trim="form.username" :disabled="Boolean(editingId)" autocomplete="off" /></el-form-item><el-form-item label="显示名称" required><el-input v-model.trim="form.displayName" /></el-form-item></div>
-        <div class="form-grid"><el-form-item label="角色" required><el-select v-model="form.role" style="width:100%"><el-option v-for="(label, value) in roleLabels" :key="value" :label="label" :value="value" /></el-select></el-form-item><el-form-item :label="editingId ? '新密码（留空不修改）' : '初始密码'" :required="!editingId"><el-input v-model="form.password" type="password" show-password autocomplete="new-password" /><small class="field-tip">至少 8 位；密码仅提交给服务端加密保存</small></el-form-item></div>
-        <div class="form-switch-row"><div><strong>允许登录</strong><small>停用后该账号现有 Token 将由服务端失效</small></div><el-switch v-model="form.enabled" /></div>
+        <div class="form-grid"><el-form-item label="角色" required><el-select v-model="form.role" :disabled="editingId === auth.user?.id" style="width:100%"><el-option v-for="(label, value) in roleLabels" :key="value" :label="label" :value="value" /></el-select></el-form-item><el-form-item v-if="!editingId" label="初始密码" required><el-input v-model="initialPassword" type="password" autocomplete="new-password" /><small class="field-tip">8-72 位，且不能为纯字母或纯数字；密码不会在列表中展示。</small></el-form-item></div>
+        <div class="form-switch-row"><div><strong>允许登录</strong><small>停用后该账号现有 Token 将由服务端失效</small></div><el-switch v-model="form.enabled" :disabled="editingId === auth.user?.id" /></div>
       </el-form>
       <template #footer><el-button @click="dialogVisible=false">取消</el-button><el-button type="primary" :loading="saving" @click="save">保存用户</el-button></template>
     </el-dialog>

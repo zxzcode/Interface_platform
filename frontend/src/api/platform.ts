@@ -33,21 +33,25 @@ export interface UserAccount {
   lastLoginAt?: string; createdAt?: string; updatedAt?: string
 }
 export interface LoginCommand { username: string; password: string }
-export interface LoginResult { token: string; user: UserAccount }
-export interface UserCommand {
-  username: string; displayName: string; role: PlatformRole; enabled: boolean; password?: string
+export interface LoginResult { accessToken: string; tokenType: 'Bearer'; expiresAt: string; user: UserAccount }
+export interface CreateUserCommand {
+  username: string; displayName: string; role: PlatformRole; enabled: boolean; password: string
 }
+export interface UpdateUserCommand { displayName: string; role: PlatformRole; enabled: boolean }
+export interface PasswordCommand { password: string }
+export interface ChangePasswordCommand { currentPassword: string; newPassword: string }
 
 export interface ApiClientSummary {
-  id: number; name: string; description?: string; appKey: string; enabled: boolean
+  id: number; code: string; name: string; appKey: string; enabled: boolean; permissions: ClientPermission[]
   createdAt?: string; updatedAt?: string
 }
-export interface ApiClientCommand { name: string; description?: string; enabled: boolean }
-export interface ClientSecretResult { id?: number; appKey: string; appSecret: string }
+export interface CreateApiClientCommand { code: string; name: string; enabled: boolean; permissions: ClientPermission[] }
+export interface UpdateApiClientCommand { name: string; enabled: boolean; permissions: ClientPermission[] }
+export interface ClientSecretResult { client: ApiClientSummary; appSecret: string }
 export type PermissionResourceType = 'HTTP' | 'SQL'
-export interface ClientPermission { resourceType: PermissionResourceType; resourceCode: string }
+export interface ClientPermission { routeType: PermissionResourceType; resourceCode: string }
 
-export interface SystemCommand { code: string; name: string; baseUrl?: string; status: string; description?: string }
+export interface SystemCommand { code: string; name: string; baseUrl: string; status: string }
 
 export interface TrendPoint { time: string; total: number; success: number }
 export interface SystemStatus { code: string; name: string; status: 'ONLINE' | 'DEGRADED' | 'OFFLINE' | 'UNKNOWN' }
@@ -56,7 +60,7 @@ export interface DashboardSummary {
   activeInterfaces: number; activeDatasources: number; trend: TrendPoint[]; systems: SystemStatus[]
 }
 
-export interface SystemOption { id: number; code: string; name: string; baseUrl?: string; status: string; description?: string; updatedAt?: string }
+export interface SystemOption { id: number; code: string; name: string; baseUrl: string; status: string; createdAt?: string; updatedAt?: string }
 export interface InterfaceSummary {
   id: number; code: string; name: string; description?: string
   sourceSystemId: number; sourceSystem: string; targetSystemId: number; targetSystem: string
@@ -104,6 +108,7 @@ export interface InvocationLogDetail extends InvocationLog {
 async function requestData<T>(config: AxiosRequestConfig): Promise<T> {
   try {
     const response = await http.request<ApiResponse<T>>(config)
+    if (response.status === 204) return undefined as T
     if (!response.data?.success) throw new Error(response.data?.message || '请求失败')
     return response.data.data
   } catch (error) {
@@ -117,6 +122,7 @@ async function requestData<T>(config: AxiosRequestConfig): Promise<T> {
 export const platformApi = {
   login: (data: LoginCommand) => requestData<LoginResult>({ url: '/auth/login', method: 'POST', data }),
   currentUser: () => requestData<UserAccount>({ url: '/auth/me' }),
+  changePassword: (data: ChangePasswordCommand) => requestData<void>({ url: '/auth/password', method: 'POST', data }),
   logout: () => requestData<void>({ url: '/auth/logout', method: 'POST' }),
 
   dashboard: () => requestData<DashboardSummary>({ url: '/dashboard' }),
@@ -126,19 +132,16 @@ export const platformApi = {
   deleteSystem: (id: number) => requestData<void>({ url: `/systems/${id}`, method: 'DELETE' }),
 
   users: () => requestData<UserAccount[]>({ url: '/users' }),
-  createUser: (data: UserCommand) => requestData<UserAccount>({ url: '/users', method: 'POST', data }),
-  updateUser: (id: number, data: UserCommand) => requestData<UserAccount>({ url: `/users/${id}`, method: 'PUT', data }),
+  createUser: (data: CreateUserCommand) => requestData<UserAccount>({ url: '/users', method: 'POST', data }),
+  updateUser: (id: number, data: UpdateUserCommand) => requestData<UserAccount>({ url: `/users/${id}`, method: 'PUT', data }),
+  resetUserPassword: (id: number, data: PasswordCommand) => requestData<void>({ url: `/users/${id}/password`, method: 'PATCH', data }),
   deleteUser: (id: number) => requestData<void>({ url: `/users/${id}`, method: 'DELETE' }),
 
   clients: () => requestData<ApiClientSummary[]>({ url: '/clients' }),
-  createClient: (data: ApiClientCommand) => requestData<ClientSecretResult>({ url: '/clients', method: 'POST', data }),
-  updateClient: (id: number, data: ApiClientCommand) => requestData<ApiClientSummary>({ url: `/clients/${id}`, method: 'PUT', data }),
+  createClient: (data: CreateApiClientCommand) => requestData<ClientSecretResult>({ url: '/clients', method: 'POST', data }),
+  updateClient: (id: number, data: UpdateApiClientCommand) => requestData<ApiClientSummary>({ url: `/clients/${id}`, method: 'PUT', data }),
   deleteClient: (id: number) => requestData<void>({ url: `/clients/${id}`, method: 'DELETE' }),
   rotateClientSecret: (id: number) => requestData<ClientSecretResult>({ url: `/clients/${id}/rotate-secret`, method: 'POST' }),
-  clientPermissions: (id: number) => requestData<ClientPermission[]>({ url: `/clients/${id}/permissions` }),
-  updateClientPermissions: (id: number, permissions: ClientPermission[]) => requestData<ClientPermission[]>({
-    url: `/clients/${id}/permissions`, method: 'PUT', data: { permissions },
-  }),
 
   interfaces: () => requestData<InterfaceSummary[]>({ url: '/interfaces' }),
   createInterface: (data: InterfaceCommand) => requestData<InterfaceSummary>({ url: '/interfaces', method: 'POST', data }),

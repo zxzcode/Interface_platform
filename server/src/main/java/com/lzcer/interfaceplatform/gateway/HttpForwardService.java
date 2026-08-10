@@ -24,7 +24,9 @@ public class HttpForwardService {
 
     private static final Set<String> REQUEST_BLOCKED_HEADERS = Set.of(
             "host", "content-length", "connection", "transfer-encoding", "upgrade", "expect", "accept-encoding",
-            "authorization", "cookie", "x-app-key", "x-signature", "x-timestamp", "x-nonce"
+            "authorization", "proxy-authorization", "cookie", "x-app-key", "x-signature", "x-timestamp", "x-nonce",
+            "keep-alive", "proxy-connection", "te", "trailer", "forwarded", "via", "x-forwarded-for",
+            "x-forwarded-host", "x-forwarded-proto", "x-forwarded-port", "x-real-ip"
     );
     private static final Set<String> RESPONSE_BLOCKED_HEADERS = Set.of(
             "content-length", "connection", "transfer-encoding", "upgrade", "set-cookie"
@@ -37,6 +39,10 @@ public class HttpForwardService {
 
     public ForwardResult forward(InterfaceService.RouteConfig route, ForwardRequest input)
             throws IOException, InterruptedException {
+        if (input.body() != null && input.body().length > maxBodyBytes) {
+            throw new BusinessException(HttpStatus.PAYLOAD_TOO_LARGE, "IP-REQUEST-001",
+                    "请求体超过平台允许的最大大小");
+        }
         URI target = appendQuery(route.targetUrl(), input.rawQuery());
         HttpClient client = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofMillis(route.connectTimeoutMs()))

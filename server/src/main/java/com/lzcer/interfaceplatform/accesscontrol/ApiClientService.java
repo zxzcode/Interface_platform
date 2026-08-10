@@ -44,7 +44,12 @@ public class ApiClientService {
     public ClientView get(long id) {
         ClientView view = find(id);
         if (view == null) throw notFound(id);
-        return view.withPermissions(permissions(id));
+        return view.withPermissions(findPermissions(id));
+    }
+
+    public List<Permission> permissions(long id) {
+        require(id);
+        return findPermissions(id);
     }
 
     @Transactional
@@ -76,6 +81,13 @@ public class ApiClientService {
                 """).param("name", command.name().strip()).param("enabled", command.enabled())
                 .param("id", id).update();
         replacePermissions(id, permissions);
+        return get(id);
+    }
+
+    @Transactional
+    public ClientView updatePermissions(long id, List<Permission> permissions) {
+        require(id);
+        replacePermissions(id, validatePermissions(permissions));
         return get(id);
     }
 
@@ -115,7 +127,7 @@ public class ApiClientService {
                 .param("resourceCode", resourceCode).query(Long.class).single() > 0;
     }
 
-    private List<Permission> permissions(long clientId) {
+    private List<Permission> findPermissions(long clientId) {
         return jdbcClient.sql("""
                 select route_type, resource_code from ip_client_permission
                  where client_id = :id order by route_type, resource_code
