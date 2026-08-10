@@ -55,6 +55,7 @@ public class JwtTokenService {
         claims.put("uid", principal.id());
         claims.put("name", principal.displayName());
         claims.put("role", principal.role());
+        // 令牌版本与用户记录绑定；修改角色、密码、停用或退出时递增版本即可使旧令牌失效。
         claims.put("ver", principal.tokenVersion());
         claims.put("iat", issuedAt.getEpochSecond());
         claims.put("exp", expiresAt.getEpochSecond());
@@ -71,6 +72,7 @@ public class JwtTokenService {
             if (parts.length != 3) throw invalidToken();
             byte[] expected = sign(parts[0] + "." + parts[1]);
             byte[] supplied = DECODER.decode(parts[2]);
+            // 常量时间比较，避免通过签名比较耗时推测正确签名的前缀。
             if (!MessageDigest.isEqual(expected, supplied)) throw invalidToken();
             Map<String, Object> header = objectMapper.readValue(DECODER.decode(parts[0]), new TypeReference<>() {});
             if (!"HS256".equals(header.get("alg")) || !"JWT".equals(header.get("typ"))) throw invalidToken();

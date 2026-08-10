@@ -54,6 +54,7 @@ public class SystemService {
     public SystemView update(long id, SystemCommand command) {
         get(id);
         Validated value = validate(command);
+        // 系统基础地址是该系统接口目标地址的白名单边界，修改前必须复核已配置接口。
         ensureReferencedTargetsRemainAllowed(id, value.baseUrl());
         jdbcClient.sql("""
                 update ip_system set system_code = :code, system_name = :name, base_url = :baseUrl,

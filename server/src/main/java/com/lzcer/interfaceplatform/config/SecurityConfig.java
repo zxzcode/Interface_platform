@@ -18,6 +18,10 @@ import tools.jackson.databind.ObjectMapper;
 @Configuration
 public class SecurityConfig {
 
+    /**
+     * 管理端使用 JWT，开放接口使用 AppKey/HMAC；两套认证入口必须保持隔离。
+     * 授权规则按声明顺序匹配，因此更具体的规则放在通用 /api/** 规则之前。
+     */
     @Bean
     SecurityFilterChain securityFilterChain(HttpSecurity http, JwtAuthenticationFilter jwtFilter,
                                             ObjectMapper objectMapper) throws Exception {
@@ -25,6 +29,7 @@ public class SecurityConfig {
                 .cors(Customizer.withDefaults())
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
+                        // /open-api/** 会在 GatewayService 中完成 HMAC 鉴权，不能要求管理端 JWT。
                         .requestMatchers("/api/auth/login", "/open-api/**", "/actuator/health", "/error").permitAll()
                         .requestMatchers("/api/auth/logout", "/api/auth/password").authenticated()
                         .requestMatchers("/actuator/**").hasRole("ADMIN")

@@ -130,11 +130,13 @@ public class SqlApiService {
 
     public QueryResult execute(RuntimeConfig config, Map<String, Object> rawParameters) {
         Map<String, Object> parameters = rawParameters == null ? Collections.emptyMap() : rawParameters;
+        // 运行时再次校验模板，而非只依赖保存时校验，避免历史数据或人工改库绕过安全约束。
         ReadOnlySqlValidator.ValidatedSql validated = validator.validate(config.sql());
         List<String> missing = validated.parameters().stream().filter(name -> !parameters.containsKey(name)).toList();
         if (!missing.isEmpty()) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "IP-SQL-002", "缺少查询参数: " + missing);
         }
+        // 业务配置不能突破平台上限；数据源连接池本身也强制标记为只读。
         JdbcTemplate template = new JdbcTemplate(datasourceService.dataSource(config.datasourceId(), true));
         template.setQueryTimeout(Math.min(config.timeoutSeconds(), timeoutCeiling));
         template.setMaxRows(Math.min(config.maxRows(), maxRowsCeiling));

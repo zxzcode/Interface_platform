@@ -56,6 +56,7 @@ public class ApiClientService {
     public ClientSecretView create(CreateClientCommand command) {
         List<Permission> permissions = validatePermissions(command.permissions());
         String appKey = "ak_" + random(18);
+        // AppSecret 只在创建和轮换时明文返回；数据库中始终只保存加密值。
         String appSecret = "sk_" + random(32);
         jdbcClient.sql("""
                 insert into ip_api_client(client_code, client_name, app_key, encrypted_app_secret, enabled)
@@ -99,6 +100,7 @@ public class ApiClientService {
                 update ip_api_client set encrypted_app_secret = :secret,
                        updated_at = current_timestamp where id = :id
                 """).param("secret", cipher.encrypt(secret)).param("id", id).update();
+        // 轮换后清理旧 Nonce，避免旧凭证请求占用新凭证的防重放窗口。
         jdbcClient.sql("delete from ip_api_nonce where client_id = :id").param("id", id).update();
         return new ClientSecretView(get(id), secret);
     }

@@ -44,12 +44,14 @@ public class HttpForwardService {
                     "请求体超过平台允许的最大大小");
         }
         URI target = appendQuery(route.targetUrl(), input.rawQuery());
+        // 不自动跟随重定向，防止已通过白名单校验的地址跳转到非受控目标。
         HttpClient client = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofMillis(route.connectTimeoutMs()))
                 .followRedirects(HttpClient.Redirect.NEVER)
                 .build();
         HttpRequest.Builder request = HttpRequest.newBuilder(target)
                 .timeout(Duration.ofMillis(route.readTimeoutMs()));
+        // 移除连接级、鉴权和代理伪造头；平台只透传业务头并统一注入 Trace ID。
         input.headers().forEach((name, values) -> {
             if (!REQUEST_BLOCKED_HEADERS.contains(name.toLowerCase(Locale.ROOT))
                     && !name.equalsIgnoreCase("X-Trace-Id")) {
@@ -66,6 +68,7 @@ public class HttpForwardService {
         try (InputStream stream = response.body()) {
             responseBody = stream.readNBytes(maxBodyBytes + 1);
         }
+        // 请求和响应使用同一上限，防止代理接口被大报文拖垮。
         if (responseBody.length > maxBodyBytes) {
             throw new BusinessException(HttpStatus.BAD_GATEWAY, "IP-TARGET-003",
                     "目标响应超过平台允许的最大大小");

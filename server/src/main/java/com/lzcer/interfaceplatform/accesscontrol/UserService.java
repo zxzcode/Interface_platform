@@ -55,6 +55,7 @@ public class UserService implements ApplicationRunner {
     @Override
     @Transactional
     public void run(ApplicationArguments args) {
+        // 仅在用户表为空时创建首个管理员，后续重启绝不覆盖人工维护的账号或密码。
         if (jdbcClient.sql("select count(*) from ip_user").query(Long.class).single() > 0) return;
         if (bootstrapPassword == null || bootstrapPassword.isBlank()) {
             throw new IllegalStateException("No platform user exists. Set PLATFORM_ADMIN_PASSWORD to initialize the first administrator.");
@@ -90,6 +91,7 @@ public class UserService implements ApplicationRunner {
     public UserPrincipal authenticateToken(String token) {
         JwtTokenService.JwtClaims claims = tokenService.verify(token);
         UserRow user = findRow(claims.userId());
+        // JWT 签名正确仍需回查用户当前状态，确保禁用、改角色和退出登录立即生效。
         if (user == null || !user.enabled() || user.tokenVersion() != claims.tokenVersion()
                 || !user.username().equals(claims.username()) || !user.role().equals(claims.role())) {
             throw new BusinessException(HttpStatus.UNAUTHORIZED, "IP-AUTH-004", "登录状态已失效，请重新登录");
@@ -114,6 +116,7 @@ public class UserService implements ApplicationRunner {
     public UserView create(CreateUserCommand command) {
         String role = validateRole(command.role());
         validatePassword(command.password());
+        // 更新用户资料也使其全部旧令牌失效，避免权限降级后旧令牌继续可用。
         jdbcClient.sql("""
                 insert into ip_user(username, password_hash, display_name, role, enabled)
                 values (:username, :passwordHash, :displayName, :role, :enabled)
@@ -162,6 +165,7 @@ public class UserService implements ApplicationRunner {
 
     @Transactional
     public void logout(long id) {
+        // 无状态 JWT 没有服务端会话可删除，递增版本相当于撤销该用户的全部现有令牌。
         jdbcClient.sql("update ip_user set token_version = token_version + 1 where id = :id")
                 .param("id", id).update();
     }

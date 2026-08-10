@@ -28,11 +28,13 @@ const router = createRouter({
 
 router.beforeEach(async (to) => {
   const auth = useAuthStore(pinia)
+  // 首次跳转先恢复会话，防止刷新页面时错误地闪回登录页。
   await auth.initialize()
 
   if (to.meta.public) return auth.authenticated ? { path: '/dashboard' } : true
   if (!auth.authenticated) return { path: '/login', query: { redirect: to.fullPath } }
 
+  // 前端路由限制只用于体验；真正的写操作权限仍由后端 SecurityConfig 强制校验。
   const roles = allowedRoles(to)
   if (roles && (!auth.role || !roles.includes(auth.role))) return { path: '/dashboard', query: { forbidden: '1' } }
   return true

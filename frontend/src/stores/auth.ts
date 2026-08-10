@@ -34,6 +34,7 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   async function initialize(): Promise<void> {
+    // 刷新页面后 token 仍在 sessionStorage，但用户资料必须通过 /auth/me 重新确认有效性。
     if (initialized || initializing.value) return
     initialized = true
     if (!token.value) return

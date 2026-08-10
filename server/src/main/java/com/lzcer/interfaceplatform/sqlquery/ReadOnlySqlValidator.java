@@ -27,11 +27,13 @@ public class ReadOnlySqlValidator {
         if (sql.isBlank() || !normalized.startsWith("select ")) {
             throw invalid("只允许单条 SELECT 查询");
         }
+        // 不支持注释和多语句，避免通过方言、注释拼接绕过只读关键字检查。
         if (sql.contains(";") || sql.contains("--") || sql.contains("/*") || sql.contains("*/")
                 || FORBIDDEN.matcher(sql).find()) {
             throw invalid("SQL 包含注释、多语句或写操作关键字");
         }
         Set<String> parameters = new LinkedHashSet<>();
+        // SQL 只允许管理员预先配置；调用方仅能提供 :name 形式的参数值，不能提交 SQL 片段。
         Matcher matcher = PARAMETER.matcher(sql);
         while (matcher.find()) parameters.add(matcher.group(1));
         return new ValidatedSql(sql, parameters);

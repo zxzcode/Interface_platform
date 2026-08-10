@@ -207,6 +207,7 @@ public class InterfaceService {
         try {
             URI uri = new URI(value);
             URI base = new URI(baseUrl);
+            // 接口目标只能落在所属系统的“协议 + 主机 + 端口 + 基础路径”白名单内，避免配置被用作 SSRF 跳板。
             if (!("http".equalsIgnoreCase(uri.getScheme()) || "https".equalsIgnoreCase(uri.getScheme()))
                     || uri.getHost() == null || uri.getUserInfo() != null || uri.getFragment() != null
                     || uri.getQuery() != null || !isWithinBasePath(uri, base)) {
@@ -234,6 +235,7 @@ public class InterfaceService {
     private boolean isWithinBasePath(URI target, URI base) {
         String targetPath = normalizedPath(target.getRawPath());
         String basePath = normalizedPath(base.getRawPath());
+        // 同源还不够：/sap-api 不能访问 /admin；编码后的路径控制字符也必须拒绝。
         if (containsEncodedPathControl(targetPath) || containsEncodedPathControl(basePath)) return false;
         return "/".equals(basePath) || targetPath.equals(basePath) || targetPath.startsWith(basePath + "/");
     }

@@ -47,6 +47,7 @@ public class InvocationLogService {
                     .param("responseSummary", value.responseSummary()).param("errorMessage", value.errorMessage())
                     .param("callTime", value.callTime()).param("completedAt", value.completedAt()).update();
         } catch (RuntimeException exception) {
+            // 审计库短暂异常不应改变已完成调用的业务响应，保留错误日志供运维处理。
             log.error("Invocation log persistence failed, traceId={}", value.traceId(), exception);
         }
     }

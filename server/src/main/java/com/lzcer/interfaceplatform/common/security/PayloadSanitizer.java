@@ -59,6 +59,7 @@ public class PayloadSanitizer {
             return null;
         }
         String normalizedType = contentType == null ? "" : contentType.toLowerCase(Locale.ROOT);
+        // 二进制、XML 不写入可读正文；日志优先保证不泄密，其次才是排障信息完整性。
         if (!isTextContent(normalizedType)) {
             return "[binary content omitted, " + body.length + " bytes]";
         }
@@ -97,6 +98,7 @@ public class PayloadSanitizer {
     }
 
     private String truncate(String value) {
+        // 必须先脱敏再截断，避免长报文前缀中的敏感字段被原样写入日志。
         if (value == null || value.length() <= maxChars) {
             return value;
         }

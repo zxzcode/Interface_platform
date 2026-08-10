@@ -61,6 +61,7 @@ public class GatewayService {
                 : sanitizer.sanitizeBody(jsonBytes(request.queryParameters()), "application/json");
         String requestHeaders = sanitizer.sanitizeHeaders(request.headers());
 
+        // 鉴权失败也写调用日志，但不能进入路由解析和下游系统，避免枚举接口配置。
         ExternalApiAuthService.Caller authenticated;
         try {
             authenticated = authService.authenticate(request);
@@ -111,6 +112,7 @@ public class GatewayService {
     public GatewayResponse executeManagementHttp(long interfaceId, String rawQuery,
                                                  Map<String, List<String>> headers, byte[] body,
                                                  String operator) {
+        // 管理端“测试调用”已由 Spring Security 保护，因此不使用开放接口的 AppKey/HMAC 协议。
         InterfaceService.RouteConfig route = interfaceService.runtimeConfig(interfaceId);
         GatewayRequest request = new GatewayRequest(route.method(), route.path(), rawQuery, Collections.emptyMap(),
                 headers, body, "management-console");
@@ -213,6 +215,7 @@ public class GatewayService {
 
     private Map<String, Object> parameters(GatewayRequest request) {
         Map<String, Object> parameters = new LinkedHashMap<>();
+        // 查询参数先装入，JSON 请求体中的同名字段随后覆盖它，便于 POST 显式传递复杂参数。
         request.queryParameters().forEach((name, values) ->
                 parameters.put(name, values.size() == 1 ? values.get(0) : values));
         if (request.body() != null && request.body().length > 0) {
@@ -228,6 +231,7 @@ public class GatewayService {
 
     private String traceId(Map<String, List<String>> headers) {
         String supplied = firstHeader(headers, "x-trace-id");
+        // 仅接受受控字符集和长度，避免把任意外部字符串带入日志和响应头。
         return supplied != null && TRACE_PATTERN.matcher(supplied).matches()
                 ? supplied : "T" + UUID.randomUUID().toString().replace("-", "");
     }

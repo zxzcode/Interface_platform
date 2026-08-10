@@ -35,6 +35,7 @@ public class OpenApiController {
             throw new BusinessException(HttpStatus.PAYLOAD_TOO_LARGE,
                     "IP-REQUEST-001", "请求体超过平台允许的最大大小");
         }
+        // rawQuery 用于 HMAC 计算；解析后的 queryParameters 仅用于 SQL 模板参数绑定。
         GatewayService.GatewayRequest request = new GatewayService.GatewayRequest(
                 servletRequest.getMethod(), normalizePath(servletRequest.getRequestURI()),
                 servletRequest.getQueryString(), queryParameters(servletRequest), headers(servletRequest),

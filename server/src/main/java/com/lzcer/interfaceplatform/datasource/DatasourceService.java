@@ -73,6 +73,7 @@ public class DatasourceService {
     public DatasourceView update(long id, DatasourceCommand command) {
         StoredCredentials existing = stored(id);
         ValidatedCommand value = validate(command, false);
+        // 编辑资料时用户名、密码为空表示“保持原凭证”，避免管理页回显不了密文而误清空连接信息。
         String username = value.username().isBlank() ? existing.encryptedUsername() : cipher.encrypt(value.username());
         String password = value.password().isBlank() ? existing.encryptedPassword() : cipher.encrypt(value.password());
         jdbcClient.sql("""
@@ -133,6 +134,7 @@ public class DatasourceService {
     }
 
     public RuntimeConfig runtimeConfig(long id) {
+        // 凭证只在构建运行时连接池前解密，列表和管理接口绝不返回明文。
         return jdbcClient.sql("""
                 select id, jdbc_url, driver_class_name, encrypted_username, encrypted_password, enabled
                   from ip_datasource where id = :id

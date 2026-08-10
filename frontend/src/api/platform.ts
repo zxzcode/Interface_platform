@@ -1,6 +1,7 @@
 import axios, { type AxiosRequestConfig } from 'axios'
 import { clearAccessToken, getAccessToken } from '@/auth/session'
 
+// 此客户端只服务管理端 /api；开放接口使用 HMAC 协议，不能复用浏览器 JWT。
 const http = axios.create({ baseURL: '/api', timeout: 30_000 })
 
 http.interceptors.request.use((config) => {
@@ -13,6 +14,7 @@ http.interceptors.response.use(
   response => response,
   (error: unknown) => {
     if (axios.isAxiosError(error) && error.response?.status === 401 && error.config?.url !== '/auth/login') {
+      // 令牌过期或被撤销时，通知应用统一清理状态并跳回登录页。
       clearAccessToken()
       window.dispatchEvent(new CustomEvent('auth:unauthorized'))
     }
@@ -109,6 +111,7 @@ async function requestData<T>(config: AxiosRequestConfig): Promise<T> {
   try {
     const response = await http.request<ApiResponse<T>>(config)
     if (response.status === 204) return undefined as T
+    // 后端业务异常也使用统一外层结构，HTTP 200 不代表本次管理操作成功。
     if (!response.data?.success) throw new Error(response.data?.message || '请求失败')
     return response.data.data
   } catch (error) {

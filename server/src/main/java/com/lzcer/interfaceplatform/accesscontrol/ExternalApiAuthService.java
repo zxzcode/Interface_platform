@@ -59,12 +59,14 @@ public class ExternalApiAuthService {
         }
         if (delta > allowedSkewSeconds * 1000) throw unauthorized("IP-SIGN-004", "请求时间戳已过期");
 
+        // 先校验时间窗和签名，再写入 Nonce；无效请求不应消耗防重放存储。
         String canonical = canonical(request, timestampText, nonce);
         String expected = hmac(client.appSecret(), canonical);
         if (!MessageDigest.isEqual(expected.getBytes(StandardCharsets.US_ASCII), signature.getBytes(StandardCharsets.US_ASCII))) {
             throw unauthorized("IP-SIGN-006", "请求签名无效");
         }
 
+        // 唯一约束由数据库兜底，并发请求携带同一 Nonce 时只能有一个请求成功。
         jdbcClient.sql("delete from ip_api_nonce where expires_at <= current_timestamp").update();
         try {
             jdbcClient.sql("""
@@ -91,6 +93,7 @@ public class ExternalApiAuthService {
     }
 
     private String canonicalQuery(String rawQuery) {
+        // 签名约定使用请求原始查询串；不排序、不解码、不重新编码，调用方和平台才能计算出同一摘要。
         return rawQuery == null ? "" : rawQuery;
     }
 

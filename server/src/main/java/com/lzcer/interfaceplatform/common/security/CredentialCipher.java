@@ -33,6 +33,7 @@ public class CredentialCipher {
 
     public String encrypt(String plainText) {
         try {
+            // 每次加密生成独立 IV，并将 IV 与密文拼接后 Base64 存储；GCM 标签包含在 doFinal 输出中。
             byte[] iv = new byte[IV_LENGTH];
             secureRandom.nextBytes(iv);
             Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");

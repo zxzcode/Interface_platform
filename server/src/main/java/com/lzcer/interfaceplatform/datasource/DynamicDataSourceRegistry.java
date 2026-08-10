@@ -15,6 +15,7 @@ public class DynamicDataSourceRegistry {
     private final Map<Long, HikariDataSource> pools = new ConcurrentHashMap<>();
 
     public DataSource get(DatasourceService.RuntimeConfig config) {
+        // 同一数据源配置复用一个小型连接池；配置变更或停用时由 invalidate 主动关闭旧连接。
         return pools.computeIfAbsent(config.id(), ignored -> createPool(config));
     }
 
@@ -32,6 +33,7 @@ public class DynamicDataSourceRegistry {
         config.setDriverClassName(value.driverClassName());
         config.setUsername(value.username());
         config.setPassword(value.password());
+        // SQL API 第一阶段只读；连接池级别再加一道保护，不能只依赖 SQL 文本校验。
         config.setReadOnly(true);
         config.setAutoCommit(true);
         config.setMaximumPoolSize(3);
