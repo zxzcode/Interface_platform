@@ -1,0 +1,11 @@
+spring:
+  datasource:
+    url: ${PLATFORM_DB_URL}
+    username: ${PLATFORM_DB_USERNAME}
+    password: ${PLATFORM_DB_PASSWORD}
+    driver-class-name: ${PLATFORM_DB_DRIVER:com.mysql.cj.jdbc.Driver}
+
+logging:
+  level:
+    root: INFO
+

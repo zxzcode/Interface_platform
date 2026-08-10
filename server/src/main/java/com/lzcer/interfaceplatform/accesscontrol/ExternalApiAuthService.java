@@ -1,0 +1,114 @@
+package com.lzcer.interfaceplatform.accesscontrol;
+
+import com.lzcer.interfaceplatform.common.api.BusinessException;
+import com.lzcer.interfaceplatform.gateway.GatewayService;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.http.HttpStatus;
+import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
+import java.nio.charset.StandardCharsets;
+import java.security.GeneralSecurityException;
+import java.security.MessageDigest;
+import java.sql.Timestamp;
+import java.time.Instant;
+import java.util.HexFormat;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+
+@Service
+public class ExternalApiAuthService {
+
+    private final ApiClientService clientService;
+    private final JdbcClient jdbcClient;
+    private final long allowedSkewSeconds;
+
+    public ExternalApiAuthService(ApiClientService clientService, JdbcClient jdbcClient,
+                                  @Value("${platform.security.signature-skew-seconds:300}") long allowedSkewSeconds) {
+        this.clientService = clientService;
+        this.jdbcClient = jdbcClient;
+        this.allowedSkewSeconds = Math.max(30, allowedSkewSeconds);
+    }
+
+    @Transactional
+    public Caller authenticate(GatewayService.GatewayRequest request) {
+        String appKey = requiredHeader(request.headers(), "x-app-key");
+        String timestampText = requiredHeader(request.headers(), "x-timestamp");
+        String nonce = requiredHeader(request.headers(), "x-nonce");
+        String signature = requiredHeader(request.headers(), "x-signature").toLowerCase(Locale.ROOT);
+        if (!nonce.matches("[A-Za-z0-9._-]{8,100}")) throw unauthorized("IP-SIGN-002", "Nonce 格式无效");
+
+        long timestamp;
+        try { timestamp = Long.parseLong(timestampText); }
+        catch (NumberFormatException exception) { throw unauthorized("IP-SIGN-003", "时间戳格式无效"); }
+        long delta = Math.abs(Instant.now().toEpochMilli() - timestamp);
+        if (delta > allowedSkewSeconds * 1000) throw unauthorized("IP-SIGN-004", "请求时间戳已过期");
+
+        ApiClientService.AuthenticatedClient client = clientService.findEnabledByAppKey(appKey);
+        if (client == null) throw unauthorized("IP-SIGN-005", "调用方凭证无效");
+        String canonical = canonical(request, timestampText, nonce);
+        String expected = hmac(client.appSecret(), canonical);
+        if (!MessageDigest.isEqual(expected.getBytes(StandardCharsets.US_ASCII), signature.getBytes(StandardCharsets.US_ASCII))) {
+            throw unauthorized("IP-SIGN-006", "请求签名无效");
+        }
+
+        jdbcClient.sql("delete from ip_api_nonce where expires_at < current_timestamp").update();
+        try {
+            jdbcClient.sql("""
+                    insert into ip_api_nonce(client_id, nonce_value, expires_at)
+                    values (:clientId, :nonce, :expiresAt)
+                    """).param("clientId", client.id()).param("nonce", nonce)
+                    .param("expiresAt", Timestamp.from(Instant.now().plusSeconds(allowedSkewSeconds * 2))).update();
+        } catch (DataIntegrityViolationException exception) {
+            throw unauthorized("IP-SIGN-007", "请求 Nonce 已使用，禁止重放");
+        }
+        return new Caller(client.id(), client.code(), client.name(), client.appKey());
+    }
+
+    public void authorize(Caller caller, String routeType, String resourceCode) {
+        if (!clientService.isAuthorized(caller.id(), routeType, resourceCode)) {
+            throw new BusinessException(HttpStatus.FORBIDDEN, "IP-SIGN-008", "调用方没有该接口权限");
+        }
+    }
+
+    public String canonical(GatewayService.GatewayRequest request, String timestamp, String nonce) {
+        return request.method().toUpperCase(Locale.ROOT) + "\n" + request.path() + "\n"
+                + (request.rawQuery() == null ? "" : request.rawQuery()) + "\n" + timestamp + "\n" + nonce + "\n"
+                + sha256(request.body());
+    }
+
+    private String hmac(String secret, String content) {
+        try {
+            Mac mac = Mac.getInstance("HmacSHA256");
+            mac.init(new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+            return HexFormat.of().formatHex(mac.doFinal(content.getBytes(StandardCharsets.UTF_8)));
+        } catch (GeneralSecurityException exception) {
+            throw new IllegalStateException("HMAC calculation failed", exception);
+        }
+    }
+
+    private String sha256(byte[] body) {
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(body == null ? new byte[0] : body));
+        } catch (GeneralSecurityException exception) {
+            throw new IllegalStateException("SHA-256 calculation failed", exception);
+        }
+    }
+
+    private String requiredHeader(Map<String, List<String>> headers, String name) {
+        return headers.entrySet().stream().filter(entry -> entry.getKey().equalsIgnoreCase(name))
+                .flatMap(entry -> entry.getValue().stream()).filter(value -> value != null && !value.isBlank())
+                .findFirst().orElseThrow(() -> unauthorized("IP-SIGN-001", "缺少鉴权请求头: " + name));
+    }
+
+    private BusinessException unauthorized(String code, String message) {
+        return new BusinessException(HttpStatus.UNAUTHORIZED, code, message);
+    }
+
+    public record Caller(long id, String code, String name, String appKey) {}
+}
