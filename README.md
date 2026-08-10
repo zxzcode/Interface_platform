@@ -1,6 +1,6 @@
 # Interface Platform
 
-面向 WMS、SAP、MES、OA、SRM 等企业系统的轻量接口平台。当前版本已经形成 HTTP 转发、多数据源只读 SQL 查询和完整调用日志的可运行闭环。
+面向 WMS、SAP、MES、OA、SRM 等企业系统的轻量接口平台。当前版本已形成 HTTP 转发、多数据源只读 SQL 查询、后台用户管理、调用方鉴权和完整调用日志的可运行闭环。
 
 ## 已实现能力
 
@@ -11,9 +11,13 @@
 - 数据源 CRUD、AES-256-GCM 凭证加密、只读小型连接池和连接测试
 - 参数化 SQL API CRUD、发布、在线测试、最大行数和执行超时
 - SQL 安全校验：只允许单条 `SELECT`，拒绝注释、多语句和写操作关键字
+- 管理端 JWT 登录、ADMIN/OPERATOR/VIEWER 角色权限和用户管理
+- 调用方 AppKey/AppSecret 管理、HTTP/SQL 接口逐项授权
+- 外部调用 HMAC-SHA256 签名、时间窗校验和 Nonce 防重放
+- 系统档案 CRUD，HTTP 目标地址与目标系统基础地址同源校验
 - Vue 3 管理端与 Spring Boot 后端合并为一个可执行 JAR
 
-暂未实现：管理用户登录、AppKey 签名鉴权、接口授权、限流、高可用和复杂编排。
+一期暂不包含：限流、高可用、复杂参数映射、可视化编排、MQ、定时同步和 Spring Cloud 拆分。
 
 ## 技术栈
 
@@ -47,10 +51,9 @@ cd E:\Code\interface_platform
 ## 示例调用
 
 ```powershell
-Invoke-RestMethod -Method Post `
-  -Uri http://localhost:8080/open-api/sql/system-query `
-  -ContentType application/json `
-  -Body '{"code":"WMS"}'
+$env:INTERFACE_APP_KEY = "创建调用方时取得的 AppKey"
+$env:INTERFACE_APP_SECRET = "创建调用方时取得的 AppSecret"
+.\scripts\call-open-api.ps1 -Path "/open-api/sql/system-query" -Body '{"code":"WMS"}'
 ```
 
 响应头包含 `X-Trace-Id`，可在“调用日志”页面查看脱敏后的完整链路信息。
@@ -63,3 +66,4 @@ Invoke-RestMethod -Method Post `
 - [数据库设计](docs/database.md)
 - [接口约定](docs/api-conventions.md)
 - [一期开发路线](docs/roadmap.md)
+- [一期产品规格](docs/phase1-product-spec.md)
