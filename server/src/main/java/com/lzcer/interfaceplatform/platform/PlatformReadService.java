@@ -1,6 +1,5 @@
 package com.lzcer.interfaceplatform.platform;
 
-import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -10,48 +9,32 @@ import java.util.List;
 @Service
 public class PlatformReadService {
 
-    private final JdbcClient jdbcClient;
+    private final PlatformReadMapper platformReadMapper;
 
-    public PlatformReadService(JdbcClient jdbcClient) {
-        this.jdbcClient = jdbcClient;
+    public PlatformReadService(PlatformReadMapper platformReadMapper) {
+        this.platformReadMapper = platformReadMapper;
     }
 
     public DashboardSummary dashboard() {
-        long todayCalls = count("select count(*) from ip_invocation_log where call_time >= current_date");
-        long failedCalls = count("select count(*) from ip_invocation_log where call_time >= current_date and call_status = 'FAILED'");
+        long todayCalls = platformReadMapper.countTodayCalls();
+        long failedCalls = platformReadMapper.countTodayFailedCalls();
         long successCalls = Math.max(0, todayCalls - failedCalls);
         BigDecimal successRate = todayCalls == 0 ? BigDecimal.ZERO
                 : BigDecimal.valueOf(successCalls * 100.0 / todayCalls).setScale(2, RoundingMode.HALF_UP);
-        long averageDuration = jdbcClient.sql(
-                "select coalesce(avg(duration_ms), 0) from ip_invocation_log where call_time >= current_date")
-                .query(Long.class).single();
+        long averageDuration = platformReadMapper.averageTodayDuration();
 
         return new DashboardSummary(todayCalls, successRate, failedCalls, averageDuration,
-                count("select count(*) from ip_interface where enabled = true")
-                        + count("select count(*) from ip_sql_api where enabled = true"),
-                count("select count(*) from ip_datasource where enabled = true"), trend(), systems());
+                platformReadMapper.countEnabledHttpInterfaces() + platformReadMapper.countEnabledSqlApis(),
+                platformReadMapper.countEnabledDatasources(), trend(), systems());
     }
 
     private List<TrendPoint> trend() {
-        return jdbcClient.sql("""
-                select hour(call_time) as call_hour, count(*) as total,
-                       sum(case when call_status = 'SUCCESS' then 1 else 0 end) as success_count
-                  from ip_invocation_log
-                 where call_time >= current_date
-                 group by hour(call_time) order by call_hour
-                """).query((rs, rowNum) -> new TrendPoint(
-                        String.format("%02d:00", rs.getInt("call_hour")),
-                        rs.getLong("total"), rs.getLong("success_count"))).list();
+        return platformReadMapper.findTodayTrend().stream().map(row ->
+                new TrendPoint(String.format("%02d:00", row.hour()), row.total(), row.success())).toList();
     }
 
     private List<SystemStatus> systems() {
-        return jdbcClient.sql("select system_code, system_name, health_status from ip_system order by id")
-                .query((rs, rowNum) -> new SystemStatus(rs.getString("system_code"),
-                        rs.getString("system_name"), rs.getString("health_status"))).list();
-    }
-
-    private long count(String sql) {
-        return jdbcClient.sql(sql).query(Long.class).single();
+        return platformReadMapper.findSystems();
     }
 
     public record DashboardSummary(long todayCalls, BigDecimal successRate, long failedCalls,

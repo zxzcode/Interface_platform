@@ -5,14 +5,11 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import org.springframework.http.HttpStatus;
 import org.springframework.dao.DataIntegrityViolationException;
-import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.net.URI;
 import java.net.URISyntaxException;
-import java.sql.ResultSet;
-import java.sql.SQLException;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Locale;
@@ -21,32 +18,24 @@ import java.util.Set;
 @Service
 public class SystemService {
     private static final Set<String> STATUSES = Set.of("ONLINE", "DEGRADED", "OFFLINE", "UNKNOWN");
-    private final JdbcClient jdbcClient;
+    private final SystemMapper systemMapper;
 
-    public SystemService(JdbcClient jdbcClient) { this.jdbcClient = jdbcClient; }
+    public SystemService(SystemMapper systemMapper) { this.systemMapper = systemMapper; }
 
     public List<SystemView> list() {
-        return jdbcClient.sql("""
-                select id, system_code, system_name, base_url, health_status, created_at, updated_at
-                  from ip_system order by system_code
-                """).query(SystemService::map).list();
+        return systemMapper.findAll().stream().map(SystemService::toView).toList();
     }
 
     public SystemView get(long id) {
-        return jdbcClient.sql("""
-                select id, system_code, system_name, base_url, health_status, created_at, updated_at
-                  from ip_system where id = :id
-                """).param("id", id).query(SystemService::map).optional().orElseThrow(() -> notFound(id));
+        SystemMapper.SystemRow row = systemMapper.findById(id);
+        if (row == null) throw notFound(id);
+        return toView(row);
     }
 
     @Transactional
     public SystemView create(SystemCommand command) {
         Validated value = validate(command);
-        jdbcClient.sql("""
-                insert into ip_system(system_code, system_name, base_url, health_status)
-                values (:code, :name, :baseUrl, :status)
-                """).param("code", value.code()).param("name", value.name())
-                .param("baseUrl", value.baseUrl()).param("status", value.status()).update();
+        systemMapper.insert(value.code(), value.name(), value.baseUrl(), value.status());
         return list().stream().filter(item -> item.code().equals(value.code())).findFirst().orElseThrow();
     }
 
@@ -56,18 +45,14 @@ public class SystemService {
         Validated value = validate(command);
         // 系统基础地址是该系统接口目标地址的白名单边界，修改前必须复核已配置接口。
         ensureReferencedTargetsRemainAllowed(id, value.baseUrl());
-        jdbcClient.sql("""
-                update ip_system set system_code = :code, system_name = :name, base_url = :baseUrl,
-                       health_status = :status, updated_at = current_timestamp where id = :id
-                """).param("code", value.code()).param("name", value.name())
-                .param("baseUrl", value.baseUrl()).param("status", value.status()).param("id", id).update();
+        systemMapper.update(id, value.code(), value.name(), value.baseUrl(), value.status());
         return get(id);
     }
 
     @Transactional
     public void delete(long id) {
         try {
-            int changed = jdbcClient.sql("delete from ip_system where id = :id").param("id", id).update();
+            int changed = systemMapper.delete(id);
             if (changed == 0) throw notFound(id);
         } catch (DataIntegrityViolationException exception) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "IP-SYSTEM-004", "被接口引用的系统档案不能删除");
@@ -96,8 +81,7 @@ public class SystemService {
 
     private void ensureReferencedTargetsRemainAllowed(long systemId, String baseUrl) {
         URI base = URI.create(baseUrl);
-        List<String> targets = jdbcClient.sql("select target_url from ip_interface where target_system_id = :id")
-                .param("id", systemId).query(String.class).list();
+        List<String> targets = systemMapper.findReferencedTargetUrls(systemId);
         for (String targetUrl : targets) {
             try {
                 URI target = URI.create(targetUrl);
@@ -142,10 +126,9 @@ public class SystemService {
                 || value.contains("%2e") || value.contains("%2f") || value.contains("%5c") || value.contains("\\");
     }
 
-    private static SystemView map(ResultSet rs, int rowNum) throws SQLException {
-        return new SystemView(rs.getLong("id"), rs.getString("system_code"), rs.getString("system_name"),
-                rs.getString("base_url"), rs.getString("health_status"),
-                rs.getObject("created_at", LocalDateTime.class), rs.getObject("updated_at", LocalDateTime.class));
+    private static SystemView toView(SystemMapper.SystemRow row) {
+        return new SystemView(row.id(), row.code(), row.name(), row.baseUrl(), row.status(),
+                row.createdAt(), row.updatedAt());
     }
 
     private BusinessException notFound(long id) { return new BusinessException(HttpStatus.NOT_FOUND, "IP-SYSTEM-404", "系统档案不存在: " + id); }
