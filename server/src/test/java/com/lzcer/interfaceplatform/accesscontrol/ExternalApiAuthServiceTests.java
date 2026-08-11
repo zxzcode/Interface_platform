@@ -5,13 +5,14 @@ import com.lzcer.interfaceplatform.common.security.CredentialCipher;
 import com.lzcer.interfaceplatform.gateway.GatewayService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.jdbc.core.simple.JdbcClient;
-import org.springframework.jdbc.datasource.DriverManagerDataSource;
+import org.springframework.dao.DataIntegrityViolationException;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.sql.Timestamp;
+import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
@@ -25,34 +26,28 @@ class ExternalApiAuthServiceTests {
     private static final String APP_KEY = "ak_test";
     private static final String APP_SECRET = "sk_test_secret";
 
-    private JdbcClient jdbcClient;
+    private final HashSet<String> usedNonces = new HashSet<>();
     private ExternalApiAuthService authService;
 
     @BeforeEach
     void setUp() {
-        DriverManagerDataSource dataSource = new DriverManagerDataSource(
-                "jdbc:h2:mem:external_auth;MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", "");
-        dataSource.setDriverClassName("org.h2.Driver");
-        jdbcClient = JdbcClient.create(dataSource);
-        jdbcClient.sql("drop table if exists ip_api_nonce").update();
-        jdbcClient.sql("""
-                create table ip_api_nonce (
-                    id bigint auto_increment primary key,
-                    client_id bigint not null,
-                    nonce_value varchar(100) not null,
-                    expires_at timestamp not null,
-                    created_at timestamp not null default current_timestamp,
-                    constraint uk_api_nonce unique (client_id, nonce_value)
-                )
-                """).update();
-        ApiClientService clientService = new ApiClientService(jdbcClient, new CredentialCipher(ENCRYPTION_KEY)) {
+        usedNonces.clear();
+        ApiNonceMapper nonceMapper = new ApiNonceMapper() {
+            @Override public int deleteExpired() { return 0; }
+            @Override public int insert(long clientId, String nonce, Timestamp expiresAt) {
+                if (!usedNonces.add(clientId + ":" + nonce)) throw new DataIntegrityViolationException("duplicate nonce");
+                return 1;
+            }
+            @Override public int deleteByClientId(long clientId) { return 0; }
+        };
+        ApiClientService clientService = new ApiClientService(null, new CredentialCipher(ENCRYPTION_KEY), nonceMapper) {
             @Override
             public AuthenticatedClient findEnabledByAppKey(String appKey) {
                 return APP_KEY.equals(appKey)
                         ? new AuthenticatedClient(9L, "WMS", "WMS", APP_KEY, APP_SECRET) : null;
             }
         };
-        authService = new ExternalApiAuthService(clientService, jdbcClient, 300);
+        authService = new ExternalApiAuthService(clientService, nonceMapper, 300);
     }
 
     @Test
@@ -68,7 +63,7 @@ class ExternalApiAuthServiceTests {
         assertThat(caller.code()).isEqualTo("WMS");
         assertThat(canonical).isEqualTo("POST\n/open-api/material/query\nwarehouse=WH01\n" + timestamp
                 + "\n" + nonce + "\n9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08");
-        assertThat(jdbcClient.sql("select count(*) from ip_api_nonce").query(Long.class).single()).isEqualTo(1L);
+        assertThat(usedNonces).hasSize(1);
         assertThatThrownBy(() -> authService.authenticate(signedRequest))
                 .isInstanceOfSatisfying(BusinessException.class,
                         exception -> assertThat(exception.code()).isEqualTo("IP-SIGN-007"));
@@ -82,7 +77,7 @@ class ExternalApiAuthServiceTests {
         assertThatThrownBy(() -> authService.authenticate(request))
                 .isInstanceOfSatisfying(BusinessException.class,
                         exception -> assertThat(exception.code()).isEqualTo("IP-SIGN-006"));
-        assertThat(jdbcClient.sql("select count(*) from ip_api_nonce").query(Long.class).single()).isZero();
+        assertThat(usedNonces).isEmpty();
     }
 
     @Test

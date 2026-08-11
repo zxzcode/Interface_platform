@@ -5,7 +5,6 @@ import com.lzcer.interfaceplatform.gateway.GatewayService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
-import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -25,13 +24,13 @@ import java.util.Map;
 public class ExternalApiAuthService {
 
     private final ApiClientService clientService;
-    private final JdbcClient jdbcClient;
+    private final ApiNonceMapper nonceMapper;
     private final long allowedSkewSeconds;
 
-    public ExternalApiAuthService(ApiClientService clientService, JdbcClient jdbcClient,
+    public ExternalApiAuthService(ApiClientService clientService, ApiNonceMapper nonceMapper,
                                   @Value("${platform.security.signature-skew-seconds:300}") long allowedSkewSeconds) {
         this.clientService = clientService;
-        this.jdbcClient = jdbcClient;
+        this.nonceMapper = nonceMapper;
         this.allowedSkewSeconds = Math.min(3600, Math.max(30, allowedSkewSeconds));
     }
 
@@ -67,13 +66,9 @@ public class ExternalApiAuthService {
         }
 
         // 唯一约束由数据库兜底，并发请求携带同一 Nonce 时只能有一个请求成功。
-        jdbcClient.sql("delete from ip_api_nonce where expires_at <= current_timestamp").update();
+        nonceMapper.deleteExpired();
         try {
-            jdbcClient.sql("""
-                    insert into ip_api_nonce(client_id, nonce_value, expires_at)
-                    values (:clientId, :nonce, :expiresAt)
-                    """).param("clientId", client.id()).param("nonce", nonce)
-                    .param("expiresAt", Timestamp.from(now.plusSeconds(allowedSkewSeconds * 2))).update();
+            nonceMapper.insert(client.id(), nonce, Timestamp.from(now.plusSeconds(allowedSkewSeconds * 2)));
         } catch (DataIntegrityViolationException exception) {
             throw unauthorized("IP-SIGN-007", "请求 Nonce 已使用，禁止重放");
         }

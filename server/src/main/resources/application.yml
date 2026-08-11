@@ -14,6 +14,11 @@ spring:
   jackson:
     default-property-inclusion: non_null
 
+mybatis:
+  mapper-locations: classpath*:mapper/**/*.xml
+  configuration:
+    map-underscore-to-camel-case: true
+
 server:
   port: ${SERVER_PORT:8080}
   shutdown: graceful

@@ -26,11 +26,13 @@ public class ApiClientService {
     private static final Set<String> ROUTE_TYPES = Set.of("HTTP", "SQL");
     private final JdbcClient jdbcClient;
     private final CredentialCipher cipher;
+    private final ApiNonceMapper nonceMapper;
     private final SecureRandom secureRandom = new SecureRandom();
 
-    public ApiClientService(JdbcClient jdbcClient, CredentialCipher cipher) {
+    public ApiClientService(JdbcClient jdbcClient, CredentialCipher cipher, ApiNonceMapper nonceMapper) {
         this.jdbcClient = jdbcClient;
         this.cipher = cipher;
+        this.nonceMapper = nonceMapper;
     }
 
     public List<ClientView> list() {
@@ -101,7 +103,8 @@ public class ApiClientService {
                        updated_at = current_timestamp where id = :id
                 """).param("secret", cipher.encrypt(secret)).param("id", id).update();
         // 轮换后清理旧 Nonce，避免旧凭证请求占用新凭证的防重放窗口。
-        jdbcClient.sql("delete from ip_api_nonce where client_id = :id").param("id", id).update();
+        // Nonce 与密钥生命周期绑定，轮换密钥后清除旧窗口中的记录。
+        nonceMapper.deleteByClientId(id);
         return new ClientSecretView(get(id), secret);
     }
 

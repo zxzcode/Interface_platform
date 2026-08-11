@@ -10,13 +10,10 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.http.HttpStatus;
-import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.sql.ResultSet;
-import java.sql.SQLException;
 import java.time.Instant;
 import java.time.Duration;
 import java.time.LocalDateTime;
@@ -32,7 +29,7 @@ public class UserService implements ApplicationRunner {
     private static final Set<String> ROLES = Set.of("ADMIN", "OPERATOR", "VIEWER");
     private static final int MAX_FAILED_LOGIN_ATTEMPTS = 5;
     private static final Duration LOGIN_LOCK_DURATION = Duration.ofMinutes(15);
-    private final JdbcClient jdbcClient;
+    private final UserMapper userMapper;
     private final PasswordEncoder passwordEncoder;
     private final JwtTokenService tokenService;
     private final String bootstrapUsername;
@@ -40,11 +37,11 @@ public class UserService implements ApplicationRunner {
     private final String bootstrapName;
     private final ConcurrentHashMap<String, LoginAttempt> failedLogins = new ConcurrentHashMap<>();
 
-    public UserService(JdbcClient jdbcClient, PasswordEncoder passwordEncoder, JwtTokenService tokenService,
+    public UserService(UserMapper userMapper, PasswordEncoder passwordEncoder, JwtTokenService tokenService,
                        @Value("${platform.security.bootstrap-admin-username:admin}") String bootstrapUsername,
                        @Value("${platform.security.bootstrap-admin-password:}") String bootstrapPassword,
                        @Value("${platform.security.bootstrap-admin-name:系统管理员}") String bootstrapName) {
-        this.jdbcClient = jdbcClient;
+        this.userMapper = userMapper;
         this.passwordEncoder = passwordEncoder;
         this.tokenService = tokenService;
         this.bootstrapUsername = bootstrapUsername;
@@ -56,18 +53,13 @@ public class UserService implements ApplicationRunner {
     @Transactional
     public void run(ApplicationArguments args) {
         // 仅在用户表为空时创建首个管理员，后续重启绝不覆盖人工维护的账号或密码。
-        if (jdbcClient.sql("select count(*) from ip_user").query(Long.class).single() > 0) return;
+        if (userMapper.countUsers() > 0) return;
         if (bootstrapPassword == null || bootstrapPassword.isBlank()) {
             throw new IllegalStateException("No platform user exists. Set PLATFORM_ADMIN_PASSWORD to initialize the first administrator.");
         }
         validatePassword(bootstrapPassword);
-        jdbcClient.sql("""
-                insert into ip_user(username, password_hash, display_name, role, enabled)
-                values (:username, :passwordHash, :displayName, 'ADMIN', true)
-                """).param("username", normalizeUsername(bootstrapUsername))
-                .param("passwordHash", passwordEncoder.encode(bootstrapPassword))
-                .param("displayName", bootstrapName == null || bootstrapName.isBlank() ? "系统管理员" : bootstrapName.strip())
-                .update();
+        userMapper.insert(normalizeUsername(bootstrapUsername), passwordEncoder.encode(bootstrapPassword),
+                bootstrapName == null || bootstrapName.isBlank() ? "系统管理员" : bootstrapName.strip(), "ADMIN", true);
         log.info("Initial platform administrator created: {}", normalizeUsername(bootstrapUsername));
     }
 
@@ -75,14 +67,13 @@ public class UserService implements ApplicationRunner {
         String username = normalizeUsername(command.username());
         Instant now = Instant.now();
         if (isLocked(username, now)) throw invalidCredentials();
-        UserRow user = findRowByUsername(username);
+        UserMapper.UserRecord user = findRowByUsername(username);
         if (user == null || !user.enabled() || !passwordEncoder.matches(command.password(), user.passwordHash())) {
             if (user != null) recordFailedLogin(username, now);
             throw invalidCredentials();
         }
         failedLogins.remove(username);
-        jdbcClient.sql("update ip_user set last_login_at = current_timestamp where id = :id")
-                .param("id", user.id()).update();
+        userMapper.updateLastLogin(user.id());
         UserPrincipal principal = user.principal();
         JwtTokenService.TokenResult token = tokenService.issue(principal);
         return new LoginView(token.accessToken(), "Bearer", token.expiresAt(), toView(user));
@@ -90,7 +81,7 @@ public class UserService implements ApplicationRunner {
 
     public UserPrincipal authenticateToken(String token) {
         JwtTokenService.JwtClaims claims = tokenService.verify(token);
-        UserRow user = findRow(claims.userId());
+        UserMapper.UserRecord user = findRow(claims.userId());
         // JWT 签名正确仍需回查用户当前状态，确保禁用、改角色和退出登录立即生效。
         if (user == null || !user.enabled() || user.tokenVersion() != claims.tokenVersion()
                 || !user.username().equals(claims.username()) || !user.role().equals(claims.role())) {
@@ -100,14 +91,11 @@ public class UserService implements ApplicationRunner {
     }
 
     public List<UserView> list() {
-        return jdbcClient.sql("""
-                select id, username, password_hash, display_name, role, enabled, token_version,
-                       last_login_at, created_at, updated_at from ip_user order by id
-                """).query(UserService::mapRow).list().stream().map(UserService::toView).toList();
+        return userMapper.findAll().stream().map(UserService::toView).toList();
     }
 
     public UserView get(long id) {
-        UserRow row = findRow(id);
+        UserMapper.UserRecord row = findRow(id);
         if (row == null) throw notFound(id);
         return toView(row);
     }
@@ -117,30 +105,21 @@ public class UserService implements ApplicationRunner {
         String role = validateRole(command.role());
         validatePassword(command.password());
         // 更新用户资料也使其全部旧令牌失效，避免权限降级后旧令牌继续可用。
-        jdbcClient.sql("""
-                insert into ip_user(username, password_hash, display_name, role, enabled)
-                values (:username, :passwordHash, :displayName, :role, :enabled)
-                """).param("username", normalizeUsername(command.username()))
-                .param("passwordHash", passwordEncoder.encode(command.password()))
-                .param("displayName", command.displayName().strip()).param("role", role)
-                .param("enabled", command.enabled()).update();
-        UserRow row = findRowByUsername(normalizeUsername(command.username()));
+        userMapper.insert(normalizeUsername(command.username()), passwordEncoder.encode(command.password()),
+                command.displayName().strip(), role, command.enabled());
+        UserMapper.UserRecord row = findRowByUsername(normalizeUsername(command.username()));
         return toView(row);
     }
 
     @Transactional
     public UserView update(long id, UpdateUserCommand command, long operatorId) {
-        UserRow current = requireRow(id);
+        UserMapper.UserRecord current = requireRow(id);
         String role = validateRole(command.role());
         if (id == operatorId && (!command.enabled() || !"ADMIN".equals(role))) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "IP-USER-002", "不能禁用当前账号或移除自己的管理员角色");
         }
         if ("ADMIN".equals(current.role()) && (!command.enabled() || !"ADMIN".equals(role))) requireAnotherAdmin(id);
-        jdbcClient.sql("""
-                update ip_user set display_name = :displayName, role = :role, enabled = :enabled,
-                       token_version = token_version + 1, updated_at = current_timestamp where id = :id
-                """).param("displayName", command.displayName().strip()).param("role", role)
-                .param("enabled", command.enabled()).param("id", id).update();
+        userMapper.updateProfileAndInvalidateTokens(id, command.displayName().strip(), role, command.enabled());
         return get(id);
     }
 
@@ -148,15 +127,12 @@ public class UserService implements ApplicationRunner {
     public void resetPassword(long id, PasswordCommand command) {
         requireRow(id);
         validatePassword(command.password());
-        jdbcClient.sql("""
-                update ip_user set password_hash = :passwordHash, token_version = token_version + 1,
-                       updated_at = current_timestamp where id = :id
-                """).param("passwordHash", passwordEncoder.encode(command.password())).param("id", id).update();
+        userMapper.updatePasswordAndInvalidateTokens(id, passwordEncoder.encode(command.password()));
     }
 
     @Transactional
     public void changePassword(long id, ChangePasswordCommand command) {
-        UserRow user = requireRow(id);
+        UserMapper.UserRecord user = requireRow(id);
         if (!passwordEncoder.matches(command.currentPassword(), user.passwordHash())) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "IP-USER-003", "当前密码错误");
         }
@@ -166,55 +142,37 @@ public class UserService implements ApplicationRunner {
     @Transactional
     public void logout(long id) {
         // 无状态 JWT 没有服务端会话可删除，递增版本相当于撤销该用户的全部现有令牌。
-        jdbcClient.sql("update ip_user set token_version = token_version + 1 where id = :id")
-                .param("id", id).update();
+        userMapper.invalidateTokens(id);
     }
 
     @Transactional
     public void delete(long id, long operatorId) {
-        UserRow user = requireRow(id);
+        UserMapper.UserRecord user = requireRow(id);
         if (id == operatorId) throw new BusinessException(HttpStatus.BAD_REQUEST, "IP-USER-004", "不能删除当前登录账号");
         if ("ADMIN".equals(user.role())) requireAnotherAdmin(id);
-        jdbcClient.sql("""
-                update ip_user set enabled = false, token_version = token_version + 1,
-                       updated_at = current_timestamp where id = :id
-                """).param("id", id).update();
+        userMapper.disableAndInvalidateTokens(id);
     }
 
     private void requireAnotherAdmin(long excludedId) {
-        long count = jdbcClient.sql("select count(*) from ip_user where role = 'ADMIN' and enabled = true and id <> :id")
-                .param("id", excludedId).query(Long.class).single();
+        long count = userMapper.countOtherEnabledAdministrators(excludedId);
         if (count == 0) throw new BusinessException(HttpStatus.BAD_REQUEST, "IP-USER-005", "必须至少保留一个启用的管理员");
     }
 
-    private UserRow requireRow(long id) {
-        UserRow row = findRow(id);
+    private UserMapper.UserRecord requireRow(long id) {
+        UserMapper.UserRecord row = findRow(id);
         if (row == null) throw notFound(id);
         return row;
     }
 
-    private UserRow findRow(long id) {
-        return jdbcClient.sql("""
-                select id, username, password_hash, display_name, role, enabled, token_version,
-                       last_login_at, created_at, updated_at from ip_user where id = :id
-                """).param("id", id).query(UserService::mapRow).optional().orElse(null);
+    private UserMapper.UserRecord findRow(long id) {
+        return userMapper.findById(id);
     }
 
-    private UserRow findRowByUsername(String username) {
-        return jdbcClient.sql("""
-                select id, username, password_hash, display_name, role, enabled, token_version,
-                       last_login_at, created_at, updated_at from ip_user where username = :username
-                """).param("username", username).query(UserService::mapRow).optional().orElse(null);
+    private UserMapper.UserRecord findRowByUsername(String username) {
+        return userMapper.findByUsername(username);
     }
 
-    private static UserRow mapRow(ResultSet rs, int rowNum) throws SQLException {
-        return new UserRow(rs.getLong("id"), rs.getString("username"), rs.getString("password_hash"),
-                rs.getString("display_name"), rs.getString("role"), rs.getBoolean("enabled"),
-                rs.getLong("token_version"), rs.getObject("last_login_at", LocalDateTime.class),
-                rs.getObject("created_at", LocalDateTime.class), rs.getObject("updated_at", LocalDateTime.class));
-    }
-
-    private static UserView toView(UserRow row) {
+    private static UserView toView(UserMapper.UserRecord row) {
         return new UserView(row.id(), row.username(), row.displayName(), row.role(), row.enabled(),
                 row.lastLoginAt(), row.createdAt(), row.updatedAt());
     }
@@ -269,12 +227,6 @@ public class UserService implements ApplicationRunner {
 
     private BusinessException notFound(long id) {
         return new BusinessException(HttpStatus.NOT_FOUND, "IP-USER-404", "用户不存在: " + id);
-    }
-
-    private record UserRow(long id, String username, String passwordHash, String displayName, String role,
-                           boolean enabled, long tokenVersion, LocalDateTime lastLoginAt,
-                           LocalDateTime createdAt, LocalDateTime updatedAt) {
-        UserPrincipal principal() { return new UserPrincipal(id, username, displayName, role, tokenVersion); }
     }
 
     private record LoginAttempt(int failedCount, Instant lockedUntil) {}
