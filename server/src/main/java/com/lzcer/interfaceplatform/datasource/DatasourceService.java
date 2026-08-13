@@ -5,7 +5,6 @@ import com.lzcer.interfaceplatform.common.security.CredentialCipher;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import org.springframework.http.HttpStatus;
-import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -24,48 +23,36 @@ public class DatasourceService {
             "MYSQL", "com.mysql.cj.jdbc.Driver",
             "POSTGRESQL", "org.postgresql.Driver",
             "SQL_SERVER", "com.microsoft.sqlserver.jdbc.SQLServerDriver",
+            "ORACLE", "oracle.jdbc.OracleDriver",
+            "SAP_HANA", "com.sap.db.jdbc.Driver",
             "H2", "org.h2.Driver"
     );
 
-    private final JdbcClient jdbcClient;
+    private final DatasourceMapper datasourceMapper;
     private final CredentialCipher cipher;
     private final DynamicDataSourceRegistry registry;
 
-    public DatasourceService(JdbcClient jdbcClient, CredentialCipher cipher, DynamicDataSourceRegistry registry) {
-        this.jdbcClient = jdbcClient;
+    public DatasourceService(DatasourceMapper datasourceMapper, CredentialCipher cipher, DynamicDataSourceRegistry registry) {
+        this.datasourceMapper = datasourceMapper;
         this.cipher = cipher;
         this.registry = registry;
     }
 
     public List<DatasourceView> list() {
-        return jdbcClient.sql("""
-                select id, datasource_code, datasource_name, db_type, jdbc_url, driver_class_name,
-                       health_status, enabled, last_checked_at, updated_at
-                  from ip_datasource order by updated_at desc
-                """).query((rs, rowNum) -> new DatasourceView(rs.getLong("id"), rs.getString("datasource_code"),
-                        rs.getString("datasource_name"), rs.getString("db_type"), rs.getString("jdbc_url"),
-                        rs.getString("driver_class_name"), rs.getString("health_status"), rs.getBoolean("enabled"),
-                        true, 0, rs.getObject("last_checked_at", LocalDateTime.class),
-                        rs.getObject("updated_at", LocalDateTime.class))).list();
+        return datasourceMapper.findAll();
     }
 
     public DatasourceView get(long id) {
-        return list().stream().filter(value -> value.id() == id).findFirst()
-                .orElseThrow(() -> notFound(id));
+        DatasourceView value = datasourceMapper.findById(id);
+        if (value == null) throw notFound(id);
+        return value;
     }
 
     @Transactional
     public DatasourceView create(DatasourceCommand command) {
         ValidatedCommand value = validate(command, true);
-        jdbcClient.sql("""
-                insert into ip_datasource(
-                    datasource_code, datasource_name, db_type, jdbc_url, driver_class_name,
-                    encrypted_username, encrypted_password, health_status, enabled
-                ) values (:code, :name, :dbType, :jdbcUrl, :driver, :username, :password, 'UNKNOWN', :enabled)
-                """).param("code", value.code()).param("name", value.name()).param("dbType", value.dbType())
-                .param("jdbcUrl", value.jdbcUrl()).param("driver", value.driverClassName())
-                .param("username", cipher.encrypt(value.username())).param("password", cipher.encrypt(value.password()))
-                .param("enabled", value.enabled()).update();
+        datasourceMapper.insert(value.code(), value.name(), value.dbType(), value.jdbcUrl(), value.driverClassName(),
+                cipher.encrypt(value.username()), cipher.encrypt(value.password()), value.enabled());
         return findByCode(value.code());
     }
 
@@ -76,25 +63,15 @@ public class DatasourceService {
         // 编辑资料时用户名、密码为空表示“保持原凭证”，避免管理页回显不了密文而误清空连接信息。
         String username = value.username().isBlank() ? existing.encryptedUsername() : cipher.encrypt(value.username());
         String password = value.password().isBlank() ? existing.encryptedPassword() : cipher.encrypt(value.password());
-        jdbcClient.sql("""
-                update ip_datasource
-                   set datasource_code = :code, datasource_name = :name, db_type = :dbType,
-                       jdbc_url = :jdbcUrl, driver_class_name = :driver,
-                       encrypted_username = :username, encrypted_password = :password,
-                       health_status = 'UNKNOWN', enabled = :enabled, updated_at = current_timestamp
-                 where id = :id
-                """).param("code", value.code()).param("name", value.name()).param("dbType", value.dbType())
-                .param("jdbcUrl", value.jdbcUrl()).param("driver", value.driverClassName())
-                .param("username", username).param("password", password).param("enabled", value.enabled())
-                .param("id", id).update();
+        datasourceMapper.update(id, value.code(), value.name(), value.dbType(), value.jdbcUrl(), value.driverClassName(),
+                username, password, value.enabled());
         registry.invalidate(id);
         return get(id);
     }
 
     @Transactional
     public DatasourceView setEnabled(long id, boolean enabled) {
-        int updated = jdbcClient.sql("update ip_datasource set enabled = :enabled, updated_at = current_timestamp where id = :id")
-                .param("enabled", enabled).param("id", id).update();
+        int updated = datasourceMapper.updateEnabled(id, enabled);
         if (updated == 0) throw notFound(id);
         registry.invalidate(id);
         return get(id);
@@ -102,7 +79,7 @@ public class DatasourceService {
 
     @Transactional
     public void delete(long id) {
-        int deleted = jdbcClient.sql("delete from ip_datasource where id = :id").param("id", id).update();
+        int deleted = datasourceMapper.delete(id);
         if (deleted == 0) throw notFound(id);
         registry.invalidate(id);
     }
@@ -135,14 +112,10 @@ public class DatasourceService {
 
     public RuntimeConfig runtimeConfig(long id) {
         // 凭证只在构建运行时连接池前解密，列表和管理接口绝不返回明文。
-        return jdbcClient.sql("""
-                select id, jdbc_url, driver_class_name, encrypted_username, encrypted_password, enabled
-                  from ip_datasource where id = :id
-                """).param("id", id).query((rs, rowNum) -> new RuntimeConfig(rs.getLong("id"),
-                        rs.getString("jdbc_url"), rs.getString("driver_class_name"),
-                        cipher.decrypt(rs.getString("encrypted_username")),
-                        cipher.decrypt(rs.getString("encrypted_password")), rs.getBoolean("enabled")))
-                .optional().orElseThrow(() -> notFound(id));
+        DatasourceMapper.RuntimeConfigRow row = datasourceMapper.findRuntimeConfig(id);
+        if (row == null) throw notFound(id);
+        return new RuntimeConfig(row.id(), row.jdbcUrl(), row.driverClassName(),
+                cipher.decrypt(row.encryptedUsername()), cipher.decrypt(row.encryptedPassword()), row.enabled());
     }
 
     private ValidatedCommand validate(DatasourceCommand command, boolean creating) {
@@ -166,10 +139,9 @@ public class DatasourceService {
     }
 
     private StoredCredentials stored(long id) {
-        return jdbcClient.sql("select encrypted_username, encrypted_password from ip_datasource where id = :id")
-                .param("id", id).query((rs, rowNum) -> new StoredCredentials(
-                        rs.getString("encrypted_username"), rs.getString("encrypted_password")))
-                .optional().orElseThrow(() -> notFound(id));
+        DatasourceMapper.CredentialsRow row = datasourceMapper.findCredentials(id);
+        if (row == null) throw notFound(id);
+        return new StoredCredentials(row.encryptedUsername(), row.encryptedPassword());
     }
 
     private DatasourceView findByCode(String code) {
@@ -179,8 +151,7 @@ public class DatasourceService {
     }
 
     private void updateHealth(long id, String status) {
-        jdbcClient.sql("update ip_datasource set health_status = :status, last_checked_at = current_timestamp where id = :id")
-                .param("status", status).param("id", id).update();
+        datasourceMapper.updateHealth(id, status);
     }
 
     private long elapsedMillis(long started) {

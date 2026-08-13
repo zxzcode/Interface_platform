@@ -7,13 +7,10 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 import org.springframework.http.HttpStatus;
-import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.security.SecureRandom;
-import java.sql.ResultSet;
-import java.sql.SQLException;
 import java.time.LocalDateTime;
 import java.util.Base64;
 import java.util.List;
@@ -24,22 +21,19 @@ import java.util.Set;
 public class ApiClientService {
 
     private static final Set<String> ROUTE_TYPES = Set.of("HTTP", "SQL");
-    private final JdbcClient jdbcClient;
+    private final ApiClientMapper apiClientMapper;
     private final CredentialCipher cipher;
     private final ApiNonceMapper nonceMapper;
     private final SecureRandom secureRandom = new SecureRandom();
 
-    public ApiClientService(JdbcClient jdbcClient, CredentialCipher cipher, ApiNonceMapper nonceMapper) {
-        this.jdbcClient = jdbcClient;
+    public ApiClientService(ApiClientMapper apiClientMapper, CredentialCipher cipher, ApiNonceMapper nonceMapper) {
+        this.apiClientMapper = apiClientMapper;
         this.cipher = cipher;
         this.nonceMapper = nonceMapper;
     }
 
     public List<ClientView> list() {
-        return jdbcClient.sql("""
-                select id, client_code, client_name, app_key, enabled, created_at, updated_at
-                  from ip_api_client order by updated_at desc
-                """).query(ApiClientService::mapClient).list().stream()
+        return apiClientMapper.findAll().stream().map(ApiClientService::toView)
                 .map(value -> value.withPermissions(permissions(value.id()))).toList();
     }
 
@@ -60,16 +54,8 @@ public class ApiClientService {
         String appKey = "ak_" + random(18);
         // AppSecret 只在创建和轮换时明文返回；数据库中始终只保存加密值。
         String appSecret = "sk_" + random(32);
-        jdbcClient.sql("""
-                insert into ip_api_client(client_code, client_name, app_key, encrypted_app_secret, enabled)
-                values (:code, :name, :appKey, :secret, :enabled)
-                """).param("code", normalizeCode(command.code())).param("name", command.name().strip())
-                .param("appKey", appKey).param("secret", cipher.encrypt(appSecret))
-                .param("enabled", command.enabled()).update();
-        ClientView saved = jdbcClient.sql("""
-                select id, client_code, client_name, app_key, enabled, created_at, updated_at
-                  from ip_api_client where app_key = :appKey
-                """).param("appKey", appKey).query(ApiClientService::mapClient).single();
+        apiClientMapper.insert(normalizeCode(command.code()), command.name().strip(), appKey, cipher.encrypt(appSecret), command.enabled());
+        ClientView saved = toView(apiClientMapper.findByAppKey(appKey));
         replacePermissions(saved.id(), permissions);
         return new ClientSecretView(get(saved.id()), appSecret);
     }
@@ -78,11 +64,7 @@ public class ApiClientService {
     public ClientView update(long id, UpdateClientCommand command) {
         require(id);
         List<Permission> permissions = validatePermissions(command.permissions());
-        jdbcClient.sql("""
-                update ip_api_client set client_name = :name, enabled = :enabled,
-                       updated_at = current_timestamp where id = :id
-                """).param("name", command.name().strip()).param("enabled", command.enabled())
-                .param("id", id).update();
+        apiClientMapper.update(id, command.name().strip(), command.enabled());
         replacePermissions(id, permissions);
         return get(id);
     }
@@ -98,10 +80,7 @@ public class ApiClientService {
     public ClientSecretView rotateSecret(long id) {
         require(id);
         String secret = "sk_" + random(32);
-        jdbcClient.sql("""
-                update ip_api_client set encrypted_app_secret = :secret,
-                       updated_at = current_timestamp where id = :id
-                """).param("secret", cipher.encrypt(secret)).param("id", id).update();
+        apiClientMapper.updateSecret(id, cipher.encrypt(secret));
         // 轮换后清理旧 Nonce，避免旧凭证请求占用新凭证的防重放窗口。
         // Nonce 与密钥生命周期绑定，轮换密钥后清除旧窗口中的记录。
         nonceMapper.deleteByClientId(id);
@@ -110,34 +89,21 @@ public class ApiClientService {
 
     @Transactional
     public void delete(long id) {
-        int changed = jdbcClient.sql("delete from ip_api_client where id = :id").param("id", id).update();
+        int changed = apiClientMapper.delete(id);
         if (changed == 0) throw notFound(id);
     }
 
     public AuthenticatedClient findEnabledByAppKey(String appKey) {
-        return jdbcClient.sql("""
-                select id, client_code, client_name, app_key, encrypted_app_secret
-                  from ip_api_client where app_key = :appKey and enabled = true
-                """).param("appKey", appKey).query((rs, rowNum) -> new AuthenticatedClient(
-                        rs.getLong("id"), rs.getString("client_code"), rs.getString("client_name"),
-                        rs.getString("app_key"), cipher.decrypt(rs.getString("encrypted_app_secret"))))
-                .optional().orElse(null);
+        ApiClientMapper.SecretRow row = apiClientMapper.findEnabledSecretByAppKey(appKey);
+        return row == null ? null : new AuthenticatedClient(row.id(), row.code(), row.name(), row.appKey(), cipher.decrypt(row.encryptedSecret()));
     }
 
     public boolean isAuthorized(long clientId, String routeType, String resourceCode) {
-        return jdbcClient.sql("""
-                select count(*) from ip_client_permission
-                 where client_id = :clientId and route_type = :routeType and resource_code = :resourceCode
-                """).param("clientId", clientId).param("routeType", routeType)
-                .param("resourceCode", resourceCode).query(Long.class).single() > 0;
+        return apiClientMapper.countPermission(clientId, routeType, resourceCode) > 0;
     }
 
     private List<Permission> findPermissions(long clientId) {
-        return jdbcClient.sql("""
-                select route_type, resource_code from ip_client_permission
-                 where client_id = :id order by route_type, resource_code
-                """).param("id", clientId).query((rs, rowNum) ->
-                new Permission(rs.getString("route_type"), rs.getString("resource_code"))).list();
+        return apiClientMapper.findPermissions(clientId);
     }
 
     private List<Permission> validatePermissions(List<Permission> raw) {
@@ -147,10 +113,7 @@ public class ApiClientService {
             if (!ROUTE_TYPES.contains(type)) {
                 throw new BusinessException(HttpStatus.BAD_REQUEST, "IP-CLIENT-002", "资源类型只支持 HTTP 或 SQL");
             }
-            String table = "HTTP".equals(type) ? "ip_interface" : "ip_sql_api";
-            String column = "HTTP".equals(type) ? "interface_code" : "api_code";
-            long count = jdbcClient.sql("select count(*) from " + table + " where " + column + " = :code")
-                    .param("code", code).query(Long.class).single();
+            long count = apiClientMapper.countResource(type, code);
             if (count == 0) throw new BusinessException(HttpStatus.BAD_REQUEST, "IP-CLIENT-003", "授权资源不存在: " + type + "/" + code);
             return new Permission(type, code);
         }).distinct().toList();
@@ -158,19 +121,13 @@ public class ApiClientService {
     }
 
     private void replacePermissions(long clientId, List<Permission> permissions) {
-        jdbcClient.sql("delete from ip_client_permission where client_id = :id").param("id", clientId).update();
-        permissions.forEach(permission -> jdbcClient.sql("""
-                insert into ip_client_permission(client_id, route_type, resource_code)
-                values (:clientId, :routeType, :resourceCode)
-                """).param("clientId", clientId).param("routeType", permission.routeType())
-                .param("resourceCode", permission.resourceCode()).update());
+        apiClientMapper.deletePermissions(clientId);
+        permissions.forEach(permission -> apiClientMapper.insertPermission(clientId, permission.routeType(), permission.resourceCode()));
     }
 
     private ClientView find(long id) {
-        return jdbcClient.sql("""
-                select id, client_code, client_name, app_key, enabled, created_at, updated_at
-                  from ip_api_client where id = :id
-                """).param("id", id).query(ApiClientService::mapClient).optional().orElse(null);
+        ApiClientMapper.ClientRow row = apiClientMapper.findById(id);
+        return row == null ? null : toView(row);
     }
 
     private void require(long id) { if (find(id) == null) throw notFound(id); }
@@ -193,10 +150,8 @@ public class ApiClientService {
         return new BusinessException(HttpStatus.NOT_FOUND, "IP-CLIENT-404", "调用方不存在: " + id);
     }
 
-    private static ClientView mapClient(ResultSet rs, int rowNum) throws SQLException {
-        return new ClientView(rs.getLong("id"), rs.getString("client_code"), rs.getString("client_name"),
-                rs.getString("app_key"), rs.getBoolean("enabled"), List.of(),
-                rs.getObject("created_at", LocalDateTime.class), rs.getObject("updated_at", LocalDateTime.class));
+    private static ClientView toView(ApiClientMapper.ClientRow row) {
+        return new ClientView(row.id(), row.code(), row.name(), row.appKey(), row.enabled(), List.of(), row.createdAt(), row.updatedAt());
     }
 
     public record Permission(@NotBlank String routeType, @NotBlank String resourceCode) {}

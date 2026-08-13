@@ -13,12 +13,9 @@ import org.springframework.dao.DataAccessException;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
-import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.sql.ResultSet;
-import java.sql.SQLException;
 import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.List;
@@ -31,17 +28,17 @@ import java.util.Set;
 public class SqlApiService {
 
     private static final Set<String> METHODS = Set.of("GET", "POST");
-    private final JdbcClient jdbcClient;
+    private final SqlApiMapper sqlApiMapper;
     private final DatasourceService datasourceService;
     private final ReadOnlySqlValidator validator;
     private final int maxRowsCeiling;
     private final int timeoutCeiling;
 
-    public SqlApiService(JdbcClient jdbcClient, DatasourceService datasourceService,
+    public SqlApiService(SqlApiMapper sqlApiMapper, DatasourceService datasourceService,
                          ReadOnlySqlValidator validator,
                          @Value("${platform.sql.max-rows-ceiling:5000}") int maxRowsCeiling,
                          @Value("${platform.sql.timeout-seconds-ceiling:60}") int timeoutCeiling) {
-        this.jdbcClient = jdbcClient;
+        this.sqlApiMapper = sqlApiMapper;
         this.datasourceService = datasourceService;
         this.validator = validator;
         this.maxRowsCeiling = maxRowsCeiling;
@@ -49,35 +46,19 @@ public class SqlApiService {
     }
 
     public List<SqlApiView> list() {
-        return jdbcClient.sql("""
-                select a.id, a.api_code, a.api_name, a.description, a.api_path, a.http_method,
-                       a.datasource_id, d.datasource_name, a.select_sql, a.timeout_seconds,
-                       a.max_rows, a.enabled, a.updated_at
-                  from ip_sql_api a
-                  join ip_datasource d on d.id = a.datasource_id
-                 order by a.updated_at desc
-                """).query(SqlApiService::mapView).list();
+        return sqlApiMapper.findAll();
     }
 
     public SqlApiView get(long id) {
-        return list().stream().filter(value -> value.id() == id).findFirst()
-                .orElseThrow(() -> notFound(id));
+        SqlApiView value = sqlApiMapper.findById(id);
+        if (value == null) throw notFound(id);
+        return value;
     }
 
     @Transactional
     public SqlApiView create(SqlApiCommand command) {
         ValidatedCommand value = validate(command);
-        jdbcClient.sql("""
-                insert into ip_sql_api(
-                    api_code, api_name, description, api_path, http_method, datasource_id,
-                    select_sql, timeout_seconds, max_rows, enabled
-                ) values (:code, :name, :description, :path, :method, :datasourceId,
-                          :sql, :timeout, :maxRows, :enabled)
-                """).param("code", value.code()).param("name", value.name())
-                .param("description", value.description()).param("path", value.path())
-                .param("method", value.method()).param("datasourceId", value.datasourceId())
-                .param("sql", value.sql()).param("timeout", value.timeoutSeconds())
-                .param("maxRows", value.maxRows()).param("enabled", value.enabled()).update();
+        sqlApiMapper.insert(value.code(), value.name(), value.description(), value.path(), value.method(), value.datasourceId(), value.sql(), value.timeoutSeconds(), value.maxRows(), value.enabled());
         return findByCode(value.code());
     }
 
@@ -85,32 +66,20 @@ public class SqlApiService {
     public SqlApiView update(long id, SqlApiCommand command) {
         requireExists(id);
         ValidatedCommand value = validate(command);
-        jdbcClient.sql("""
-                update ip_sql_api
-                   set api_code = :code, api_name = :name, description = :description,
-                       api_path = :path, http_method = :method, datasource_id = :datasourceId,
-                       select_sql = :sql, timeout_seconds = :timeout, max_rows = :maxRows,
-                       enabled = :enabled, updated_at = current_timestamp
-                 where id = :id
-                """).param("code", value.code()).param("name", value.name())
-                .param("description", value.description()).param("path", value.path())
-                .param("method", value.method()).param("datasourceId", value.datasourceId())
-                .param("sql", value.sql()).param("timeout", value.timeoutSeconds())
-                .param("maxRows", value.maxRows()).param("enabled", value.enabled()).param("id", id).update();
+        sqlApiMapper.update(id, value.code(), value.name(), value.description(), value.path(), value.method(), value.datasourceId(), value.sql(), value.timeoutSeconds(), value.maxRows(), value.enabled());
         return get(id);
     }
 
     @Transactional
     public SqlApiView setEnabled(long id, boolean enabled) {
-        int updated = jdbcClient.sql("update ip_sql_api set enabled = :enabled, updated_at = current_timestamp where id = :id")
-                .param("enabled", enabled).param("id", id).update();
+        int updated = sqlApiMapper.updateEnabled(id, enabled);
         if (updated == 0) throw notFound(id);
         return get(id);
     }
 
     @Transactional
     public void delete(long id) {
-        int deleted = jdbcClient.sql("delete from ip_sql_api where id = :id").param("id", id).update();
+        int deleted = sqlApiMapper.delete(id);
         if (deleted == 0) throw notFound(id);
     }
 
@@ -119,13 +88,7 @@ public class SqlApiService {
     }
 
     public Optional<RuntimeConfig> resolve(String path, String method) {
-        return jdbcClient.sql("""
-                select a.id, a.api_code, a.api_name, a.api_path, a.http_method, a.datasource_id,
-                       d.datasource_name, a.select_sql, a.timeout_seconds, a.max_rows
-                  from ip_sql_api a join ip_datasource d on d.id = a.datasource_id
-                 where a.api_path = :path and a.http_method = :method and a.enabled = true and d.enabled = true
-                """).param("path", path).param("method", method.toUpperCase(Locale.ROOT))
-                .query(SqlApiService::mapRuntime).optional();
+        return Optional.ofNullable(sqlApiMapper.findEnabledByPathAndMethod(path, method.toUpperCase(Locale.ROOT)));
     }
 
     public QueryResult execute(RuntimeConfig config, Map<String, Object> rawParameters) {
@@ -151,14 +114,9 @@ public class SqlApiService {
     }
 
     private RuntimeConfig runtimeConfig(long id, boolean requireEnabled) {
-        String enabledClause = requireEnabled ? " and a.enabled = true and d.enabled = true" : "";
-        return jdbcClient.sql("""
-                select a.id, a.api_code, a.api_name, a.api_path, a.http_method, a.datasource_id,
-                       d.datasource_name, a.select_sql, a.timeout_seconds, a.max_rows
-                  from ip_sql_api a join ip_datasource d on d.id = a.datasource_id
-                 where a.id = :id
-                """ + enabledClause).param("id", id).query(SqlApiService::mapRuntime)
-                .optional().orElseThrow(() -> notFound(id));
+        RuntimeConfig value = sqlApiMapper.findRuntimeConfig(id, requireEnabled);
+        if (value == null) throw notFound(id);
+        return value;
     }
 
     private ValidatedCommand validate(SqlApiCommand command) {
@@ -188,8 +146,7 @@ public class SqlApiService {
     }
 
     private void requireExists(long id) {
-        if (jdbcClient.sql("select count(*) from ip_sql_api where id = :id").param("id", id)
-                .query(Long.class).single() == 0) throw notFound(id);
+        if (sqlApiMapper.findById(id) == null) throw notFound(id);
     }
 
     private SqlApiView findByCode(String code) {
@@ -210,21 +167,6 @@ public class SqlApiService {
 
     private BusinessException notFound(long id) {
         return new BusinessException(HttpStatus.NOT_FOUND, "IP-SQL-404", "SQL API 不存在或已停用: " + id);
-    }
-
-    private static SqlApiView mapView(ResultSet rs, int rowNum) throws SQLException {
-        return new SqlApiView(rs.getLong("id"), rs.getString("api_code"), rs.getString("api_name"),
-                rs.getString("description"), rs.getString("api_path"), rs.getString("http_method"),
-                rs.getLong("datasource_id"), rs.getString("datasource_name"), rs.getString("select_sql"),
-                rs.getInt("timeout_seconds"), rs.getInt("max_rows"), rs.getBoolean("enabled"),
-                rs.getObject("updated_at", LocalDateTime.class));
-    }
-
-    private static RuntimeConfig mapRuntime(ResultSet rs, int rowNum) throws SQLException {
-        return new RuntimeConfig(rs.getLong("id"), rs.getString("api_code"), rs.getString("api_name"),
-                rs.getString("api_path"), rs.getString("http_method"), rs.getLong("datasource_id"),
-                rs.getString("datasource_name"), rs.getString("select_sql"),
-                rs.getInt("timeout_seconds"), rs.getInt("max_rows"));
     }
 
     public record SqlApiCommand(

@@ -24,3 +24,7 @@
 - 本地和生产平台基础库使用 MySQL；自动化测试使用 H2。
 - 业务数据源与平台配置库不是同一个概念，业务数据源必须使用只读账户。
 - `config/application-local.yml` 仅用于本机且已被 Git 忽略；生产密码通过环境变量或密钥服务注入。
+
+## �ⲿҵ������Դ
+
+�����˿����� MySQL��PostgreSQL��SQL Server��Oracle��SAP HANA �� H2��Oracle Ĭ������Ϊ `oracle.jdbc.OracleDriver`��URL ʾ��Ϊ `jdbc:oracle:thin:@//host:1521/serviceName`��SAP HANA Ĭ������Ϊ `com.sap.db.jdbc.Driver`��URL ʾ��Ϊ `jdbc:sap://host:30015/?databaseName=SYSTEMDB`����������Ӧʹ��ֻ�����ݿ��˺ţ�HANA Cloud ����Ӧ��ʵ��Ҫ������ TLS������׷�� `encrypt=true` ��֤��У�������
