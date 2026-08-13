@@ -68,3 +68,15 @@ interface-platform.jar
 
 它可以和现有 DataProcessor 位于同一台服务器，但使用独立端口、配置目录、日志目录、数据库账号和启动脚本。不要把接口平台直接合入正在生产运行的 DataProcessor 进程。
 
+## 5. 后端代码分层
+
+后端业务代码按职责统一归入三个同级目录：
+
+```text
+com.lzcer.interfaceplatform
+├── controller   HTTP 接口入口
+├── service      业务编排与事务
+└── mapper       MyBatis 持久化接口
+```
+
+Mapper XML 统一放在 `server/src/main/resources/mapper/`。安全认证、动态数据源、只读 SQL 校验等基础设施仍保留独立包，避免与三层业务代码混放。

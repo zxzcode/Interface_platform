@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.lzcer.interfaceplatform.mapper.SystemMapper">
+    <resultMap id="systemRow" type="com.lzcer.interfaceplatform.mapper.SystemMapper$SystemRow">
+        <constructor><arg column="id" javaType="java.lang.Long"/><arg column="system_code"/><arg column="system_name"/><arg column="base_url"/><arg column="health_status"/><arg column="created_at" javaType="java.time.LocalDateTime"/><arg column="updated_at" javaType="java.time.LocalDateTime"/></constructor>
+    </resultMap>
+    <select id="findAll" resultMap="systemRow">select id, system_code, system_name, base_url, health_status, created_at, updated_at from ip_system order by system_code</select>
+    <select id="findById" resultMap="systemRow">select id, system_code, system_name, base_url, health_status, created_at, updated_at from ip_system where id = #{id}</select>
+    <insert id="insert">insert into ip_system(system_code, system_name, base_url, health_status) values (#{code}, #{name}, #{baseUrl}, #{status})</insert>
+    <update id="update">update ip_system set system_code = #{code}, system_name = #{name}, base_url = #{baseUrl}, health_status = #{status}, updated_at = current_timestamp where id = #{id}</update>
+    <delete id="delete">delete from ip_system where id = #{id}</delete>
+    <select id="findReferencedTargetUrls" resultType="String">select target_url from ip_interface where target_system_id = #{systemId}</select>
+</mapper>

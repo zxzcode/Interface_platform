@@ -1,5 +1,6 @@
 package com.lzcer.interfaceplatform.accesscontrol;
 
+import com.lzcer.interfaceplatform.service.JwtTokenService;
 import com.lzcer.interfaceplatform.common.api.BusinessException;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.ObjectMapper;
@@ -8,7 +9,6 @@ import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
-import java.util.HexFormat;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -35,7 +35,11 @@ class JwtTokenServiceTests {
     @Test
     void rejectsJwtWhenSignatureWasTamperedWith() {
         String token = tokenService.issue(new UserPrincipal(1L, "admin", "Admin", "ADMIN", 1L)).accessToken();
-        String tampered = token.substring(0, token.length() - 1) + (token.endsWith("a") ? "b" : "a");
+        int signatureStart = token.lastIndexOf('.') + 1;
+        char firstSignatureCharacter = token.charAt(signatureStart);
+        String tampered = token.substring(0, signatureStart)
+                + (firstSignatureCharacter == 'a' ? 'b' : 'a')
+                + token.substring(signatureStart + 1);
 
         assertThatThrownBy(() -> tokenService.verify(tampered))
                 .isInstanceOfSatisfying(BusinessException.class,

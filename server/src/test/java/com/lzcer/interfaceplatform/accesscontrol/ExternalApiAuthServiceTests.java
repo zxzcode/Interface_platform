@@ -2,7 +2,10 @@ package com.lzcer.interfaceplatform.accesscontrol;
 
 import com.lzcer.interfaceplatform.common.api.BusinessException;
 import com.lzcer.interfaceplatform.common.security.CredentialCipher;
-import com.lzcer.interfaceplatform.gateway.GatewayService;
+import com.lzcer.interfaceplatform.mapper.ApiNonceMapper;
+import com.lzcer.interfaceplatform.service.ApiClientService;
+import com.lzcer.interfaceplatform.service.ExternalApiAuthService;
+import com.lzcer.interfaceplatform.service.GatewayService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;

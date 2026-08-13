@@ -62,3 +62,9 @@
 
 涉及后端时运行 Maven 测试；涉及前端时运行 TypeScript 检查和生产构建。不要提交 `target/`、`node_modules/`、`dist/`、`logs/`、`data/`。
 
+## 后端目录约定
+
+- `controller/` 统一放置 HTTP 接口入口。
+- `service/` 统一放置业务编排和事务逻辑。
+- `mapper/` 统一放置 MyBatis Mapper 接口；对应 XML 统一放在 `server/src/main/resources/mapper/`。
+- `common/`、`config/`、`accesscontrol/`、`datasource/`、`sqlquery/` 保留通用能力和基础设施类，不再混放 Controller、Service 或 Mapper。
