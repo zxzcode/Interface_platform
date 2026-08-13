@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.lzcer.interfaceplatform.accesscontrol.ApiNonceMapper">
+    <delete id="deleteExpired">delete from ip_api_nonce where expires_at &lt;= current_timestamp</delete>
+    <insert id="insert">
+        insert into ip_api_nonce(client_id, nonce_value, expires_at)
+        values (#{clientId}, #{nonce}, #{expiresAt})
+    </insert>
+    <delete id="deleteByClientId">delete from ip_api_nonce where client_id = #{clientId}</delete>
+</mapper>

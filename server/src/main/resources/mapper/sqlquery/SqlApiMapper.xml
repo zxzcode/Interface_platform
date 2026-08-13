@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.lzcer.interfaceplatform.sqlquery.SqlApiMapper">
+ <resultMap id="view" type="com.lzcer.interfaceplatform.sqlquery.SqlApiService$SqlApiView"><constructor><idArg column="id" javaType="long"/><arg column="api_code"/><arg column="api_name"/><arg column="description"/><arg column="api_path"/><arg column="http_method"/><arg column="datasource_id" javaType="long"/><arg column="datasource_name"/><arg column="select_sql"/><arg column="timeout_seconds" javaType="int"/><arg column="max_rows" javaType="int"/><arg column="enabled" javaType="boolean"/><arg column="updated_at" javaType="java.time.LocalDateTime"/></constructor></resultMap>
+ <resultMap id="runtime" type="com.lzcer.interfaceplatform.sqlquery.SqlApiService$RuntimeConfig"><constructor><idArg column="id" javaType="long"/><arg column="api_code"/><arg column="api_name"/><arg column="api_path"/><arg column="http_method"/><arg column="datasource_id" javaType="long"/><arg column="datasource_name"/><arg column="select_sql"/><arg column="timeout_seconds" javaType="int"/><arg column="max_rows" javaType="int"/></constructor></resultMap>
+ <sql id="viewColumns">a.id, a.api_code, a.api_name, a.description, a.api_path, a.http_method, a.datasource_id, d.datasource_name, a.select_sql, a.timeout_seconds, a.max_rows, a.enabled, a.updated_at</sql>
+ <sql id="runtimeColumns">a.id, a.api_code, a.api_name, a.api_path, a.http_method, a.datasource_id, d.datasource_name, a.select_sql, a.timeout_seconds, a.max_rows</sql>
+ <select id="findAll" resultMap="view">select <include refid="viewColumns"/> from ip_sql_api a join ip_datasource d on d.id=a.datasource_id order by a.updated_at desc</select>
+ <select id="findById" resultMap="view">select <include refid="viewColumns"/> from ip_sql_api a join ip_datasource d on d.id=a.datasource_id where a.id=#{id}</select>
+ <select id="findByCode" resultMap="view">select <include refid="viewColumns"/> from ip_sql_api a join ip_datasource d on d.id=a.datasource_id where a.api_code=#{code}</select>
+ <select id="findEnabledByPathAndMethod" resultMap="runtime">select <include refid="runtimeColumns"/> from ip_sql_api a join ip_datasource d on d.id=a.datasource_id where a.api_path=#{path} and a.http_method=#{method} and a.enabled=true and d.enabled=true</select>
+ <select id="findRuntimeConfig" resultMap="runtime">select <include refid="runtimeColumns"/> from ip_sql_api a join ip_datasource d on d.id=a.datasource_id where a.id=#{id}<if test="requireEnabled"> and a.enabled=true and d.enabled=true</if></select>
+ <insert id="insert">insert into ip_sql_api(api_code,api_name,description,api_path,http_method,datasource_id,select_sql,timeout_seconds,max_rows,enabled) values(#{code},#{name},#{description},#{path},#{method},#{datasourceId},#{sql},#{timeout},#{maxRows},#{enabled})</insert>
+ <update id="update">update ip_sql_api set api_code=#{code},api_name=#{name},description=#{description},api_path=#{path},http_method=#{method},datasource_id=#{datasourceId},select_sql=#{sql},timeout_seconds=#{timeout},max_rows=#{maxRows},enabled=#{enabled},updated_at=current_timestamp where id=#{id}</update>
+ <update id="updateEnabled">update ip_sql_api set enabled=#{enabled},updated_at=current_timestamp where id=#{id}</update>
+ <delete id="delete">delete from ip_sql_api where id=#{id}</delete>
+</mapper>

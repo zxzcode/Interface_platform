@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.lzcer.interfaceplatform.datasource.DatasourceMapper">
+    <resultMap id="view" type="com.lzcer.interfaceplatform.datasource.DatasourceService$DatasourceView"><constructor><idArg column="id" javaType="long"/><arg column="datasource_code"/><arg column="datasource_name"/><arg column="db_type"/><arg column="jdbc_url"/><arg column="driver_class_name"/><arg column="health_status"/><arg column="enabled" javaType="boolean"/><arg column="credential_configured" javaType="boolean"/><arg column="pool_usage" javaType="int"/><arg column="last_checked_at" javaType="java.time.LocalDateTime"/><arg column="updated_at" javaType="java.time.LocalDateTime"/></constructor></resultMap>
+    <resultMap id="runtime" type="com.lzcer.interfaceplatform.datasource.DatasourceMapper$RuntimeConfigRow"><constructor><idArg column="id" javaType="long"/><arg column="jdbc_url"/><arg column="driver_class_name"/><arg column="encrypted_username"/><arg column="encrypted_password"/><arg column="enabled" javaType="boolean"/></constructor></resultMap>
+    <resultMap id="credentials" type="com.lzcer.interfaceplatform.datasource.DatasourceMapper$CredentialsRow"><constructor><arg column="encrypted_username"/><arg column="encrypted_password"/></constructor></resultMap>
+    <sql id="viewColumns">id, datasource_code, datasource_name, db_type, jdbc_url, driver_class_name, health_status, enabled, true as credential_configured, 0 as pool_usage, last_checked_at, updated_at</sql>
+    <select id="findAll" resultMap="view">select <include refid="viewColumns"/> from ip_datasource order by updated_at desc</select>
+    <select id="findByCode" resultMap="view">select <include refid="viewColumns"/> from ip_datasource where datasource_code = #{code}</select>
+    <select id="findById" resultMap="view">select <include refid="viewColumns"/> from ip_datasource where id = #{id}</select>
+    <select id="findRuntimeConfig" resultMap="runtime">select id, jdbc_url, driver_class_name, encrypted_username, encrypted_password, enabled from ip_datasource where id = #{id}</select>
+    <select id="findCredentials" resultMap="credentials">select encrypted_username, encrypted_password from ip_datasource where id = #{id}</select>
+    <insert id="insert">insert into ip_datasource(datasource_code, datasource_name, db_type, jdbc_url, driver_class_name, encrypted_username, encrypted_password, health_status, enabled) values (#{code}, #{name}, #{dbType}, #{jdbcUrl}, #{driver}, #{username}, #{password}, 'UNKNOWN', #{enabled})</insert>
+    <update id="update">update ip_datasource set datasource_code=#{code}, datasource_name=#{name}, db_type=#{dbType}, jdbc_url=#{jdbcUrl}, driver_class_name=#{driver}, encrypted_username=#{username}, encrypted_password=#{password}, health_status='UNKNOWN', enabled=#{enabled}, updated_at=current_timestamp where id=#{id}</update>
+    <update id="updateEnabled">update ip_datasource set enabled=#{enabled}, updated_at=current_timestamp where id=#{id}</update>
+    <update id="updateHealth">update ip_datasource set health_status=#{status}, last_checked_at=current_timestamp where id=#{id}</update>
+    <delete id="delete">delete from ip_datasource where id=#{id}</delete>
+</mapper>
