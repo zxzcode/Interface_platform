@@ -6,6 +6,7 @@ import com.lzcer.interfaceplatform.mapper.ApiNonceMapper;
 import com.lzcer.interfaceplatform.service.ApiClientService;
 import com.lzcer.interfaceplatform.service.ExternalApiAuthService;
 import com.lzcer.interfaceplatform.service.GatewayService;
+import com.lzcer.interfaceplatform.model.client.ClientModels.AuthenticatedClient;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;

@@ -1,5 +1,5 @@
 package com.lzcer.interfaceplatform.mapper;
-import com.lzcer.interfaceplatform.service.InterfaceService;
+import com.lzcer.interfaceplatform.model.interfacecatalog.InterfaceModels;
 
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -7,10 +7,10 @@ import java.util.List;
 
 @Mapper
 public interface InterfaceMapper {
-    List<InterfaceService.InterfaceView> findAll();
-    InterfaceService.InterfaceView findById(@Param("id") long id);
-    InterfaceService.InterfaceView findByCode(@Param("code") String code);
-    List<InterfaceService.SystemOption> findSystemOptions();
+    List<InterfaceModels.InterfaceView> findAll();
+    InterfaceModels.InterfaceView findById(@Param("id") long id);
+    InterfaceModels.InterfaceView findByCode(@Param("code") String code);
+    List<InterfaceModels.SystemOption> findSystemOptions();
     String findSystemBaseUrl(@Param("id") long id);
     RouteRow findEnabledByPathAndMethod(@Param("path") String path, @Param("method") String method);
     RouteRow findRuntimeConfig(@Param("id") long id);
@@ -20,6 +20,6 @@ public interface InterfaceMapper {
     int delete(@Param("id") long id);
     int deleteHttpPermissions(@Param("code") String code);
 
-    record RouteRow(long id, String code, String name, String targetSystem, String targetStatus, String targetUrl,
-                    int connectTimeoutMs, int readTimeoutMs, String method, String path) {}
+    record RouteRow(Long id, String code, String name, String targetSystem, String targetStatus, String targetUrl,
+                    Integer connectTimeoutMs, Integer readTimeoutMs, String method, String path) {}
 }

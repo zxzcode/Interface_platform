@@ -8,6 +8,7 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
+import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -19,7 +20,10 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 
+import static com.lzcer.interfaceplatform.model.client.ClientModels.*;
+
 @Service
+@RequiredArgsConstructor
 public class ApiClientService {
 
     private static final Set<String> ROUTE_TYPES = Set.of("HTTP", "SQL");
@@ -27,12 +31,6 @@ public class ApiClientService {
     private final CredentialCipher cipher;
     private final ApiNonceMapper nonceMapper;
     private final SecureRandom secureRandom = new SecureRandom();
-
-    public ApiClientService(ApiClientMapper apiClientMapper, CredentialCipher cipher, ApiNonceMapper nonceMapper) {
-        this.apiClientMapper = apiClientMapper;
-        this.cipher = cipher;
-        this.nonceMapper = nonceMapper;
-    }
 
     public List<ClientView> list() {
         return apiClientMapper.findAll().stream().map(ApiClientService::toView)
@@ -156,18 +154,4 @@ public class ApiClientService {
         return new ClientView(row.id(), row.code(), row.name(), row.appKey(), row.enabled(), List.of(), row.createdAt(), row.updatedAt());
     }
 
-    public record Permission(@NotBlank String routeType, @NotBlank String resourceCode) {}
-    public record CreateClientCommand(@NotBlank @Size(max = 80) String code,
-                                      @NotBlank @Size(max = 160) String name,
-                                      boolean enabled, List<@Valid Permission> permissions) {}
-    public record UpdateClientCommand(@NotBlank @Size(max = 160) String name,
-                                      boolean enabled, List<@Valid Permission> permissions) {}
-    public record ClientView(long id, String code, String name, String appKey, boolean enabled,
-                             List<Permission> permissions, LocalDateTime createdAt, LocalDateTime updatedAt) {
-        ClientView withPermissions(List<Permission> value) {
-            return new ClientView(id, code, name, appKey, enabled, value, createdAt, updatedAt);
-        }
-    }
-    public record ClientSecretView(ClientView client, String appSecret) {}
-    public record AuthenticatedClient(long id, String code, String name, String appKey, String appSecret) {}
 }

@@ -6,8 +6,7 @@ import com.lzcer.interfaceplatform.mapper.UserMapper;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
@@ -24,10 +23,12 @@ import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
+import static com.lzcer.interfaceplatform.model.user.UserModels.*;
+
 @Service
+@Slf4j
 public class UserService implements ApplicationRunner {
 
-    private static final Logger log = LoggerFactory.getLogger(UserService.class);
     private static final Set<String> ROLES = Set.of("ADMIN", "OPERATOR", "VIEWER");
     private static final int MAX_FAILED_LOGIN_ATTEMPTS = 5;
     private static final Duration LOGIN_LOCK_DURATION = Duration.ofMinutes(15);
@@ -233,18 +234,4 @@ public class UserService implements ApplicationRunner {
 
     private record LoginAttempt(int failedCount, Instant lockedUntil) {}
 
-    public record LoginCommand(@NotBlank String username, @NotBlank String password) {}
-    public record LoginView(String accessToken, String tokenType, Instant expiresAt, UserView user) {}
-    public record CreateUserCommand(
-            @NotBlank @Size(min = 3, max = 80) @Pattern(regexp = "[A-Za-z0-9._-]+") String username,
-            @NotBlank @Size(min = 8, max = 72) String password,
-            @NotBlank @Size(max = 120) String displayName,
-            @NotBlank String role, boolean enabled) {}
-    public record UpdateUserCommand(@NotBlank @Size(max = 120) String displayName,
-                                    @NotBlank String role, boolean enabled) {}
-    public record PasswordCommand(@NotBlank @Size(min = 8, max = 72) String password) {}
-    public record ChangePasswordCommand(@NotBlank String currentPassword,
-                                        @NotBlank @Size(min = 8, max = 72) String newPassword) {}
-    public record UserView(long id, String username, String displayName, String role, boolean enabled,
-                           LocalDateTime lastLoginAt, LocalDateTime createdAt, LocalDateTime updatedAt) {}
 }

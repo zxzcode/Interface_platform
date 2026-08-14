@@ -1,20 +1,20 @@
 package com.lzcer.interfaceplatform.service;
 
 import com.lzcer.interfaceplatform.mapper.PlatformReadMapper;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.List;
 
+import static com.lzcer.interfaceplatform.model.platform.PlatformModels.*;
+
 @Service
+@RequiredArgsConstructor
 public class PlatformReadService {
 
     private final PlatformReadMapper platformReadMapper;
-
-    public PlatformReadService(PlatformReadMapper platformReadMapper) {
-        this.platformReadMapper = platformReadMapper;
-    }
 
     public DashboardSummary dashboard() {
         long todayCalls = platformReadMapper.countTodayCalls();
@@ -38,11 +38,4 @@ public class PlatformReadService {
         return platformReadMapper.findSystems();
     }
 
-    public record DashboardSummary(long todayCalls, BigDecimal successRate, long failedCalls,
-                                   long averageDurationMs, long activeInterfaces, long activeDatasources,
-                                   List<TrendPoint> trend, List<SystemStatus> systems) {}
-
-    public record TrendPoint(String time, long total, long success) {}
-
-    public record SystemStatus(String code, String name, String status) {}
 }

@@ -25,6 +25,8 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
+import static com.lzcer.interfaceplatform.model.sqlapi.SqlApiModels.*;
+
 @Service
 public class SqlApiService {
 
@@ -169,28 +171,6 @@ public class SqlApiService {
     private BusinessException notFound(long id) {
         return new BusinessException(HttpStatus.NOT_FOUND, "IP-SQL-404", "SQL API 不存在或已停用: " + id);
     }
-
-    public record SqlApiCommand(
-            @NotBlank @Size(max = 80) @Pattern(regexp = "[A-Za-z0-9_-]+") String code,
-            @NotBlank @Size(max = 160) String name,
-            @Size(max = 500) String description,
-            @NotBlank @Size(max = 300) String path,
-            @NotBlank String method,
-            @NotNull Long datasourceId,
-            @NotBlank String sql,
-            @Min(1) @Max(60) int timeoutSeconds,
-            @Min(1) @Max(5000) int maxRows,
-            boolean enabled) {}
-
-    public record SqlApiView(long id, String code, String name, String description, String path, String method,
-                             long datasourceId, String datasourceName, String sql, int timeoutSeconds,
-                             int maxRows, boolean enabled, LocalDateTime updatedAt) {}
-
-    public record RuntimeConfig(long id, String code, String name, String path, String method,
-                                long datasourceId, String datasourceName, String sql,
-                                int timeoutSeconds, int maxRows) {}
-
-    public record QueryResult(int rowCount, int maxRows, List<Map<String, Object>> rows) {}
 
     private record ValidatedCommand(String code, String name, String description, String path, String method,
                                     long datasourceId, String sql, int timeoutSeconds, int maxRows,

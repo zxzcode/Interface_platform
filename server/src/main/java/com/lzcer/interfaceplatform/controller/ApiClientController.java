@@ -2,7 +2,9 @@ package com.lzcer.interfaceplatform.controller;
 
 import com.lzcer.interfaceplatform.common.api.ApiResponse;
 import com.lzcer.interfaceplatform.service.ApiClientService;
+import com.lzcer.interfaceplatform.model.client.ClientModels;
 import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -18,44 +20,43 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/api/clients")
+@RequiredArgsConstructor
 public class ApiClientController {
 
     private final ApiClientService service;
 
-    public ApiClientController(ApiClientService service) { this.service = service; }
-
     @GetMapping
-    public ApiResponse<List<ApiClientService.ClientView>> list() { return ApiResponse.ok(service.list()); }
+    public ApiResponse<List<ClientModels.ClientView>> list() { return ApiResponse.ok(service.list()); }
 
     @GetMapping("/{id}")
-    public ApiResponse<ApiClientService.ClientView> get(@PathVariable long id) { return ApiResponse.ok(service.get(id)); }
+    public ApiResponse<ClientModels.ClientView> get(@PathVariable long id) { return ApiResponse.ok(service.get(id)); }
 
     @GetMapping("/{id}/permissions")
-    public ApiResponse<List<ApiClientService.Permission>> permissions(@PathVariable long id) {
+    public ApiResponse<List<ClientModels.Permission>> permissions(@PathVariable long id) {
         return ApiResponse.ok(service.permissions(id));
     }
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    public ApiResponse<ApiClientService.ClientSecretView> create(
-            @Valid @RequestBody ApiClientService.CreateClientCommand command) {
+    public ApiResponse<ClientModels.ClientSecretView> create(
+            @Valid @RequestBody ClientModels.CreateClientCommand command) {
         return ApiResponse.ok(service.create(command));
     }
 
     @PutMapping("/{id}")
-    public ApiResponse<ApiClientService.ClientView> update(@PathVariable long id,
-            @Valid @RequestBody ApiClientService.UpdateClientCommand command) {
+    public ApiResponse<ClientModels.ClientView> update(@PathVariable long id,
+            @Valid @RequestBody ClientModels.UpdateClientCommand command) {
         return ApiResponse.ok(service.update(id, command));
     }
 
     @PutMapping("/{id}/permissions")
-    public ApiResponse<ApiClientService.ClientView> updatePermissions(@PathVariable long id,
+    public ApiResponse<ClientModels.ClientView> updatePermissions(@PathVariable long id,
             @Valid @RequestBody PermissionCommand command) {
         return ApiResponse.ok(service.updatePermissions(id, command.permissions()));
     }
 
     @PostMapping("/{id}/rotate-secret")
-    public ApiResponse<ApiClientService.ClientSecretView> rotate(@PathVariable long id) {
+    public ApiResponse<ClientModels.ClientSecretView> rotate(@PathVariable long id) {
         return ApiResponse.ok(service.rotateSecret(id));
     }
 
@@ -63,5 +64,5 @@ public class ApiClientController {
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void delete(@PathVariable long id) { service.delete(id); }
 
-    public record PermissionCommand(@Valid List<ApiClientService.Permission> permissions) {}
+    public record PermissionCommand(@Valid List<ClientModels.Permission> permissions) {}
 }

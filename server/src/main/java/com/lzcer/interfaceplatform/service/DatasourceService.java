@@ -6,6 +6,8 @@ import com.lzcer.interfaceplatform.datasource.DynamicDataSourceRegistry;
 import com.lzcer.interfaceplatform.mapper.DatasourceMapper;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -18,7 +20,11 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
+import static com.lzcer.interfaceplatform.model.datasource.DatasourceModels.*;
+
 @Service
+@Slf4j
+@RequiredArgsConstructor
 public class DatasourceService {
 
     private static final Map<String, String> DEFAULT_DRIVERS = Map.of(
@@ -33,12 +39,6 @@ public class DatasourceService {
     private final DatasourceMapper datasourceMapper;
     private final CredentialCipher cipher;
     private final DynamicDataSourceRegistry registry;
-
-    public DatasourceService(DatasourceMapper datasourceMapper, CredentialCipher cipher, DynamicDataSourceRegistry registry) {
-        this.datasourceMapper = datasourceMapper;
-        this.cipher = cipher;
-        this.registry = registry;
-    }
 
     public List<DatasourceView> list() {
         return datasourceMapper.findAll();
@@ -95,10 +95,13 @@ public class DatasourceService {
             }
             long duration = elapsedMillis(started);
             updateHealth(id, "ONLINE");
+            log.info("Datasource connectivity check passed, datasourceId={}, durationMs={}", id, duration);
             return new ConnectionTestResult(true, duration, "连接成功");
         } catch (SQLException | RuntimeException exception) {
             updateHealth(id, "OFFLINE");
             registry.invalidate(id);
+            log.warn("Datasource connectivity check failed, datasourceId={}, exceptionType={}",
+                    id, exception.getClass().getSimpleName());
             throw new BusinessException(HttpStatus.UNPROCESSABLE_ENTITY, "IP-DS-TEST-001",
                     "数据源连接失败: " + rootMessage(exception));
         }
@@ -170,24 +173,8 @@ public class DatasourceService {
         return new BusinessException(HttpStatus.NOT_FOUND, "IP-DS-404", "数据源不存在: " + id);
     }
 
-    public record DatasourceCommand(@NotBlank @Size(max = 80) String code,
-                                    @NotBlank @Size(max = 160) String name,
-                                    @NotBlank @Size(max = 40) String dbType,
-                                    @NotBlank @Size(max = 1000) String jdbcUrl,
-                                    @Size(max = 200) String driverClassName,
-                                    @Size(max = 300) String username,
-                                    @Size(max = 500) String password,
-                                    boolean enabled) {}
-
-    public record DatasourceView(long id, String code, String name, String dbType, String jdbcUrl,
-                                 String driverClassName, String status, boolean enabled,
-                                 boolean credentialConfigured, int poolUsage, LocalDateTime lastCheckedAt,
-                                 LocalDateTime updatedAt) {}
-
-    public record ConnectionTestResult(boolean success, long durationMs, String message) {}
-
-    public record RuntimeConfig(long id, String jdbcUrl, String driverClassName,
-                                String username, String password, boolean enabled) {}
+    public record RuntimeConfig(Long id, String jdbcUrl, String driverClassName,
+                                String username, String password, Boolean enabled) {}
 
     private record ValidatedCommand(String code, String name, String dbType, String jdbcUrl,
                                     String driverClassName, String username, String password, boolean enabled) {}

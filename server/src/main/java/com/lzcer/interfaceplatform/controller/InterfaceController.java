@@ -6,6 +6,8 @@ import jakarta.servlet.http.HttpServletRequest;
 import com.lzcer.interfaceplatform.accesscontrol.UserPrincipal;
 import com.lzcer.interfaceplatform.service.GatewayService;
 import com.lzcer.interfaceplatform.service.InterfaceService;
+import com.lzcer.interfaceplatform.model.interfacecatalog.InterfaceModels;
+import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.http.HttpStatus;
@@ -27,41 +29,37 @@ import java.util.Collections;
 
 @RestController
 @RequestMapping("/api")
+@RequiredArgsConstructor
 public class InterfaceController {
 
     private final InterfaceService service;
     private final GatewayService gatewayService;
 
-    public InterfaceController(InterfaceService service, GatewayService gatewayService) {
-        this.service = service;
-        this.gatewayService = gatewayService;
-    }
-
     @GetMapping("/interfaces")
-    public ApiResponse<List<InterfaceService.InterfaceView>> list() {
+    public ApiResponse<List<InterfaceModels.InterfaceView>> list() {
         return ApiResponse.ok(service.list());
     }
 
     @GetMapping("/interfaces/{id}")
-    public ApiResponse<InterfaceService.InterfaceView> get(@PathVariable long id) {
+    public ApiResponse<InterfaceModels.InterfaceView> get(@PathVariable long id) {
         return ApiResponse.ok(service.get(id));
     }
 
     @PostMapping("/interfaces")
     @ResponseStatus(HttpStatus.CREATED)
-    public ApiResponse<InterfaceService.InterfaceView> create(
-            @Valid @RequestBody InterfaceService.InterfaceCommand command) {
+    public ApiResponse<InterfaceModels.InterfaceView> create(
+            @Valid @RequestBody InterfaceModels.InterfaceCommand command) {
         return ApiResponse.ok(service.create(command));
     }
 
     @PutMapping("/interfaces/{id}")
-    public ApiResponse<InterfaceService.InterfaceView> update(
-            @PathVariable long id, @Valid @RequestBody InterfaceService.InterfaceCommand command) {
+    public ApiResponse<InterfaceModels.InterfaceView> update(
+            @PathVariable long id, @Valid @RequestBody InterfaceModels.InterfaceCommand command) {
         return ApiResponse.ok(service.update(id, command));
     }
 
     @PatchMapping("/interfaces/{id}/enabled")
-    public ApiResponse<InterfaceService.InterfaceView> setEnabled(
+    public ApiResponse<InterfaceModels.InterfaceView> setEnabled(
             @PathVariable long id, @RequestBody EnabledCommand command) {
         return ApiResponse.ok(service.setEnabled(id, command.enabled()));
     }

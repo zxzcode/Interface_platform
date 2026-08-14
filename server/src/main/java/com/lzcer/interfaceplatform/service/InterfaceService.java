@@ -9,6 +9,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
+import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -22,17 +23,15 @@ import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
 
+import static com.lzcer.interfaceplatform.model.interfacecatalog.InterfaceModels.*;
+
 @Service
+@RequiredArgsConstructor
 public class InterfaceService {
 
     private static final Set<String> METHODS = Set.of("GET", "POST", "PUT", "PATCH", "DELETE");
     private final InterfaceMapper interfaceMapper;
     private final SystemMapper systemMapper;
-
-    public InterfaceService(InterfaceMapper interfaceMapper, SystemMapper systemMapper) {
-        this.interfaceMapper = interfaceMapper;
-        this.systemMapper = systemMapper;
-    }
 
     public List<InterfaceView> list() {
         return interfaceMapper.findAll();
@@ -193,35 +192,6 @@ public class InterfaceService {
 
     private BusinessException notFound(long id) {
         return new BusinessException(HttpStatus.NOT_FOUND, "IP-CONFIG-404", "接口配置不存在: " + id);
-    }
-
-    public record InterfaceCommand(
-            @NotBlank @Size(max = 80) @Pattern(regexp = "[A-Za-z0-9_-]+") String code,
-            @NotBlank @Size(max = 160) String name,
-            @Size(max = 500) String description,
-            @NotNull Long sourceSystemId,
-            @NotNull Long targetSystemId,
-            @NotBlank String method,
-            @NotBlank @Size(max = 300) String path,
-            @NotBlank @Size(max = 1000) String targetUrl,
-            @Min(500) @Max(30000) int connectTimeoutMs,
-            @Min(500) @Max(120000) int readTimeoutMs,
-            boolean enabled
-    ) {}
-
-    public record InterfaceView(long id, String code, String name, String description,
-                                long sourceSystemId, String sourceSystem, long targetSystemId, String targetSystem,
-                                String method, String path, String targetUrl, int connectTimeoutMs,
-                                int readTimeoutMs, boolean enabled, long todayCalls, BigDecimal successRate,
-                                long averageDurationMs, LocalDateTime updatedAt) {}
-
-    public record SystemOption(long id, String code, String name, String baseUrl, String status) {}
-
-    public record RouteConfig(long id, String code, String name, String targetSystem, String targetStatus, URI targetUrl,
-                              int connectTimeoutMs, int readTimeoutMs, String method, String path) {
-        public boolean targetAvailable() {
-            return !"OFFLINE".equalsIgnoreCase(targetStatus);
-        }
     }
 
     private record ValidatedCommand(String code, String name, String description, long sourceSystemId,

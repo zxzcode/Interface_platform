@@ -2,7 +2,9 @@ package com.lzcer.interfaceplatform.controller;
 
 import com.lzcer.interfaceplatform.common.api.ApiResponse;
 import com.lzcer.interfaceplatform.service.DatasourceService;
+import com.lzcer.interfaceplatform.model.datasource.DatasourceModels;
 import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -19,45 +21,42 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/api/datasources")
+@RequiredArgsConstructor
 public class DatasourceController {
 
     private final DatasourceService service;
 
-    public DatasourceController(DatasourceService service) {
-        this.service = service;
-    }
-
     @GetMapping
-    public ApiResponse<List<DatasourceService.DatasourceView>> list() {
+    public ApiResponse<List<DatasourceModels.DatasourceView>> list() {
         return ApiResponse.ok(service.list());
     }
 
     @GetMapping("/{id}")
-    public ApiResponse<DatasourceService.DatasourceView> get(@PathVariable long id) {
+    public ApiResponse<DatasourceModels.DatasourceView> get(@PathVariable long id) {
         return ApiResponse.ok(service.get(id));
     }
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    public ApiResponse<DatasourceService.DatasourceView> create(
-            @Valid @RequestBody DatasourceService.DatasourceCommand command) {
+    public ApiResponse<DatasourceModels.DatasourceView> create(
+            @Valid @RequestBody DatasourceModels.DatasourceCommand command) {
         return ApiResponse.ok(service.create(command));
     }
 
     @PutMapping("/{id}")
-    public ApiResponse<DatasourceService.DatasourceView> update(
-            @PathVariable long id, @Valid @RequestBody DatasourceService.DatasourceCommand command) {
+    public ApiResponse<DatasourceModels.DatasourceView> update(
+            @PathVariable long id, @Valid @RequestBody DatasourceModels.DatasourceCommand command) {
         return ApiResponse.ok(service.update(id, command));
     }
 
     @PatchMapping("/{id}/enabled")
-    public ApiResponse<DatasourceService.DatasourceView> setEnabled(
+    public ApiResponse<DatasourceModels.DatasourceView> setEnabled(
             @PathVariable long id, @RequestBody EnabledCommand command) {
         return ApiResponse.ok(service.setEnabled(id, command.enabled()));
     }
 
     @PostMapping("/{id}/test")
-    public ApiResponse<DatasourceService.ConnectionTestResult> test(@PathVariable long id) {
+    public ApiResponse<DatasourceModels.ConnectionTestResult> test(@PathVariable long id) {
         return ApiResponse.ok(service.test(id));
     }
 

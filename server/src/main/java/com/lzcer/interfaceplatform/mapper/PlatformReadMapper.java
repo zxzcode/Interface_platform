@@ -1,6 +1,6 @@
 package com.lzcer.interfaceplatform.mapper;
 
-import com.lzcer.interfaceplatform.service.PlatformReadService;
+import com.lzcer.interfaceplatform.model.platform.PlatformModels;
 import org.apache.ibatis.annotations.Mapper;
 
 import java.util.List;
@@ -15,7 +15,7 @@ public interface PlatformReadMapper {
     long countEnabledSqlApis();
     long countEnabledDatasources();
     List<TrendRow> findTodayTrend();
-    List<PlatformReadService.SystemStatus> findSystems();
+    List<PlatformModels.SystemStatus> findSystems();
 
     record TrendRow(Integer hour, Long total, Long success) {}
 }

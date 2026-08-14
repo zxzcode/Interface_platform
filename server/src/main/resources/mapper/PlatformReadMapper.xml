@@ -12,7 +12,7 @@
                sum(case when call_status = 'SUCCESS' then 1 else 0 end) as success
         from ip_invocation_log where call_time &gt;= current_date group by hour(call_time) order by hour
     </select>
-    <select id="findSystems" resultType="com.lzcer.interfaceplatform.service.PlatformReadService$SystemStatus">
+    <select id="findSystems" resultType="com.lzcer.interfaceplatform.model.platform.PlatformModels$SystemStatus">
         select system_code as code, system_name as name, health_status as status from ip_system order by id
     </select>
 </mapper>

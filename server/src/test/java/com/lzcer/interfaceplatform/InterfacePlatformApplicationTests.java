@@ -2,7 +2,15 @@ package com.lzcer.interfaceplatform;
 
 import com.lzcer.interfaceplatform.service.UserService;
 import com.lzcer.interfaceplatform.service.InvocationLogService;
+import com.lzcer.interfaceplatform.model.invocation.InvocationLogModels;
+import com.lzcer.interfaceplatform.model.user.UserModels;
 import com.lzcer.interfaceplatform.common.api.BusinessException;
+import com.lzcer.interfaceplatform.mapper.ApiClientMapper;
+import com.lzcer.interfaceplatform.mapper.DatasourceMapper;
+import com.lzcer.interfaceplatform.mapper.InterfaceMapper;
+import com.lzcer.interfaceplatform.mapper.PlatformReadMapper;
+import com.lzcer.interfaceplatform.mapper.SqlApiMapper;
+import com.lzcer.interfaceplatform.mapper.SystemMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -29,13 +37,20 @@ class InterfacePlatformApplicationTests {
     @Autowired
     private InvocationLogService invocationLogService;
 
+    @Autowired private ApiClientMapper apiClientMapper;
+    @Autowired private DatasourceMapper datasourceMapper;
+    @Autowired private InterfaceMapper interfaceMapper;
+    @Autowired private PlatformReadMapper platformReadMapper;
+    @Autowired private SqlApiMapper sqlApiMapper;
+    @Autowired private SystemMapper systemMapper;
+
     @Test
     void contextLoads() {
     }
 
     @Test
     void logoutInvalidatesPreviouslyIssuedTokenThroughTokenVersion() {
-        UserService.LoginView login = userService.login(new UserService.LoginCommand("admin", "TestAdmin#2026"));
+        UserModels.LoginView login = userService.login(new UserModels.LoginCommand("admin", "TestAdmin#2026"));
 
         userService.logout(login.user().id());
 
@@ -47,13 +62,25 @@ class InterfacePlatformApplicationTests {
     @Test
     void invocationLogMapperMapsSummaryAndDetailRecords() {
         String traceId = "Tlogmap202608131656";
-        invocationLogService.save(new InvocationLogService.InvocationRecord(traceId, "HTTP", "TEST_LOG",
+        invocationLogService.save(new InvocationLogModels.InvocationRecord(traceId, "HTTP", "TEST_LOG",
                 "日志映射测试", "test", "platform", "GET", "/open-api/test", "http://localhost/test",
                 "SUCCESS", null, 200, 1, "{}", null, "{}", "{}", null,
                 LocalDateTime.now(), LocalDateTime.now()));
 
-        assertThat(invocationLogService.list(10)).extracting(InvocationLogService.LogSummary::traceId)
+        assertThat(invocationLogService.list(10)).extracting(InvocationLogModels.LogSummary::traceId)
                 .contains(traceId);
         assertThat(invocationLogService.detail(traceId).status()).isEqualTo("SUCCESS");
+    }
+
+    @Test
+    void fixedPlatformMappersMapConfiguredRecords() {
+        assertThat(apiClientMapper.findAll()).isNotNull();
+        // H2 测试库不依赖演示数据是否存在；调用本身即可验证 XML 到 record 的映射。
+        assertThat(datasourceMapper.findAll()).isNotNull();
+        assertThat(interfaceMapper.findAll()).isNotNull();
+        assertThat(interfaceMapper.findSystemOptions()).isNotNull();
+        assertThat(platformReadMapper.findSystems()).isNotNull();
+        assertThat(sqlApiMapper.findAll()).isNotNull();
+        assertThat(systemMapper.findAll()).isNotNull();
     }
 }

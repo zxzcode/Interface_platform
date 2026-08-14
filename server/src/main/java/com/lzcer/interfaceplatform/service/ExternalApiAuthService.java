@@ -2,6 +2,7 @@ package com.lzcer.interfaceplatform.service;
 
 import com.lzcer.interfaceplatform.common.api.BusinessException;
 import com.lzcer.interfaceplatform.mapper.ApiNonceMapper;
+import com.lzcer.interfaceplatform.model.client.ClientModels;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
@@ -43,7 +44,7 @@ public class ExternalApiAuthService {
         if (!nonce.matches("[A-Za-z0-9_-]{16,64}")) throw unauthorized("IP-SIGN-002", "Nonce 格式无效");
         if (!signature.matches("[0-9a-f]{64}")) throw unauthorized("IP-SIGN-006", "请求签名无效");
 
-        ApiClientService.AuthenticatedClient client = clientService.findEnabledByAppKey(appKey);
+        ClientModels.AuthenticatedClient client = clientService.findEnabledByAppKey(appKey);
         if (client == null) throw unauthorized("IP-SIGN-005", "调用方凭证无效");
 
         long timestamp;

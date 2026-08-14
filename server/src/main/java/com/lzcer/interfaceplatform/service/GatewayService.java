@@ -5,6 +5,12 @@ import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.ObjectMapper;
 import com.lzcer.interfaceplatform.common.api.BusinessException;
 import com.lzcer.interfaceplatform.common.security.PayloadSanitizer;
+import com.lzcer.interfaceplatform.model.gateway.GatewayModels;
+import com.lzcer.interfaceplatform.model.interfacecatalog.InterfaceModels;
+import com.lzcer.interfaceplatform.model.invocation.InvocationLogModels;
+import com.lzcer.interfaceplatform.model.sqlapi.SqlApiModels;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
@@ -22,6 +28,8 @@ import java.util.UUID;
 import java.util.regex.Pattern;
 
 @Service
+@Slf4j
+@RequiredArgsConstructor
 public class GatewayService {
 
     private static final Pattern TRACE_PATTERN = Pattern.compile("[A-Za-z0-9._-]{8,64}");
@@ -32,19 +40,6 @@ public class GatewayService {
     private final PayloadSanitizer sanitizer;
     private final ObjectMapper objectMapper;
     private final ExternalApiAuthService authService;
-
-    public GatewayService(InterfaceService interfaceService, SqlApiService sqlApiService,
-                          HttpForwardService forwardService, InvocationLogService logService,
-                          PayloadSanitizer sanitizer, ObjectMapper objectMapper,
-                          ExternalApiAuthService authService) {
-        this.interfaceService = interfaceService;
-        this.sqlApiService = sqlApiService;
-        this.forwardService = forwardService;
-        this.logService = logService;
-        this.sanitizer = sanitizer;
-        this.objectMapper = objectMapper;
-        this.authService = authService;
-    }
 
     public GatewayResponse execute(GatewayRequest request) {
         String traceId = traceId(request.headers());
@@ -68,18 +63,18 @@ public class GatewayService {
                     requestHeaders, requestSummary, startedAt, timer);
         }
 
-        Optional<InterfaceService.RouteConfig> httpRoute = interfaceService.resolve(request.path(), request.method());
+        Optional<InterfaceModels.RouteConfig> httpRoute = interfaceService.resolve(request.path(), request.method());
         if (httpRoute.isPresent()) {
             try {
                 authService.authorize(authenticated, "HTTP", httpRoute.get().code());
             } catch (BusinessException exception) {
-                InterfaceService.RouteConfig route = httpRoute.get();
+                InterfaceModels.RouteConfig route = httpRoute.get();
                 return failure(request, traceId, caller, route.code(), route.name(), route.targetSystem(),
                         "HTTP", route.targetUrl().toString(), exception.status(), exception.code(), exception.getMessage(),
                         requestHeaders, requestSummary, startedAt, timer);
             }
             if (!httpRoute.get().targetAvailable()) {
-                InterfaceService.RouteConfig route = httpRoute.get();
+                InterfaceModels.RouteConfig route = httpRoute.get();
                 return failure(request, traceId, caller, route.code(), route.name(), route.targetSystem(),
                         "HTTP", route.targetUrl().toString(), HttpStatus.SERVICE_UNAVAILABLE, "IP-TARGET-002",
                         "目标系统当前不可用", requestHeaders, requestSummary, startedAt, timer);
@@ -87,12 +82,12 @@ public class GatewayService {
             return executeHttp(httpRoute.get(), request, traceId, caller, requestHeaders,
                     requestSummary, startedAt, timer);
         }
-        Optional<SqlApiService.RuntimeConfig> sqlRoute = sqlApiService.resolve(request.path(), request.method());
+        Optional<SqlApiModels.RuntimeConfig> sqlRoute = sqlApiService.resolve(request.path(), request.method());
         if (sqlRoute.isPresent()) {
             try {
                 authService.authorize(authenticated, "SQL", sqlRoute.get().code());
             } catch (BusinessException exception) {
-                SqlApiService.RuntimeConfig route = sqlRoute.get();
+                SqlApiModels.RuntimeConfig route = sqlRoute.get();
                 return failure(request, traceId, caller, route.code(), route.name(), route.datasourceName(),
                         "SQL", "datasource:" + route.datasourceId(), exception.status(), exception.code(), exception.getMessage(),
                         requestHeaders, requestSummary, startedAt, timer);
@@ -109,7 +104,7 @@ public class GatewayService {
                                                  Map<String, List<String>> headers, byte[] body,
                                                  String operator) {
         // 管理端“测试调用”已由 Spring Security 保护，因此不使用开放接口的 AppKey/HMAC 协议。
-        InterfaceService.RouteConfig route = interfaceService.runtimeConfig(interfaceId);
+        InterfaceModels.RouteConfig route = interfaceService.runtimeConfig(interfaceId);
         GatewayRequest request = new GatewayRequest(route.method(), route.path(), rawQuery, Collections.emptyMap(),
                 headers, body, "management-console");
         String traceId = traceId(headers);
@@ -126,7 +121,7 @@ public class GatewayService {
                 sanitizer.sanitizeHeaders(headers), requestSummary, startedAt, timer);
     }
 
-    private GatewayResponse executeHttp(InterfaceService.RouteConfig route, GatewayRequest request,
+    private GatewayResponse executeHttp(InterfaceModels.RouteConfig route, GatewayRequest request,
                                         String traceId, String caller, String requestHeaders,
                                         String requestSummary, LocalDateTime startedAt, long timer) {
         try {
@@ -135,7 +130,7 @@ public class GatewayService {
                             request.headers(), request.body(), traceId));
             Map<String, List<String>> headers = withTrace(result.headers(), traceId);
             boolean success = result.status() < 400;
-            logService.save(new InvocationLogService.InvocationRecord(traceId, "HTTP", route.code(), route.name(),
+            logService.save(new InvocationLogModels.InvocationRecord(traceId, "HTTP", route.code(), route.name(),
                     caller, route.targetSystem(), request.method(), request.path(), route.targetUrl().toString(),
                     success ? "SUCCESS" : "FAILED", success ? null : "IP-TARGET-HTTP", result.status(),
                     elapsed(timer), requestHeaders, requestSummary, sanitizer.sanitizeHeaders(headers),
@@ -166,17 +161,17 @@ public class GatewayService {
         }
     }
 
-    private GatewayResponse executeSql(SqlApiService.RuntimeConfig route, GatewayRequest request,
+    private GatewayResponse executeSql(SqlApiModels.RuntimeConfig route, GatewayRequest request,
                                        String traceId, String caller, String requestHeaders,
                                        String requestSummary, LocalDateTime startedAt, long timer) {
         try {
             Map<String, Object> parameters = parameters(request);
-            SqlApiService.QueryResult result = sqlApiService.execute(route, parameters);
+            SqlApiModels.QueryResult result = sqlApiService.execute(route, parameters);
             byte[] body = jsonBytes(Map.of("traceId", traceId, "rowCount", result.rowCount(),
                     "maxRows", result.maxRows(), "rows", result.rows()));
             Map<String, List<String>> headers = withTrace(
                     Map.of("content-type", List.of("application/json;charset=UTF-8")), traceId);
-            logService.save(new InvocationLogService.InvocationRecord(traceId, "SQL", route.code(), route.name(),
+            logService.save(new InvocationLogModels.InvocationRecord(traceId, "SQL", route.code(), route.name(),
                     caller, route.datasourceName(), request.method(), request.path(), "datasource:" + route.datasourceId(),
                     "SUCCESS", null, 200, elapsed(timer), requestHeaders, requestSummary,
                     sanitizer.sanitizeHeaders(headers), sanitizer.sanitizeBody(body, "application/json"),
@@ -198,11 +193,13 @@ public class GatewayService {
                                     HttpStatus status, String platformCode, String message,
                                     String requestHeaders, String requestSummary,
                                     LocalDateTime startedAt, long timer) {
+        log.warn("Gateway invocation failed, traceId={}, caller={}, routeCode={}, routeType={}, status={}, code={}",
+                traceId, caller, code, routeType, status.value(), platformCode);
         byte[] body = jsonBytes(Map.of("success", false, "code", platformCode,
                 "message", message == null ? "调用失败" : message, "traceId", traceId));
         Map<String, List<String>> headers = withTrace(
                 Map.of("content-type", List.of("application/json;charset=UTF-8")), traceId);
-        logService.save(new InvocationLogService.InvocationRecord(traceId, routeType, code, name, caller, target,
+        logService.save(new InvocationLogModels.InvocationRecord(traceId, routeType, code, name, caller, target,
                 request.method(), request.path(), targetAddress, "FAILED", platformCode, status.value(), elapsed(timer),
                 requestHeaders, requestSummary, sanitizer.sanitizeHeaders(headers),
                 sanitizer.sanitizeBody(body, "application/json"), message, startedAt, LocalDateTime.now()));
@@ -265,15 +262,14 @@ public class GatewayService {
         return (System.nanoTime() - timer) / 1_000_000;
     }
 
-    public record GatewayRequest(String method, String path, String rawQuery,
-                                 Map<String, List<String>> queryParameters,
-                                 Map<String, List<String>> headers, byte[] body, String remoteAddress) {
-        public GatewayRequest {
-            queryParameters = queryParameters == null ? Collections.emptyMap() : queryParameters;
-            headers = headers == null ? Collections.emptyMap() : headers;
-            body = body == null ? new byte[0] : body;
+    public static class GatewayRequest extends GatewayModels.GatewayRequest {
+        public GatewayRequest(String method, String path, String rawQuery, Map<String, List<String>> queryParameters,
+                              Map<String, List<String>> headers, byte[] body, String remoteAddress) {
+            super(method, path, rawQuery, queryParameters, headers, body, remoteAddress);
         }
     }
 
-    public record GatewayResponse(int status, Map<String, List<String>> headers, byte[] body) {}
+    public static class GatewayResponse extends GatewayModels.GatewayResponse {
+        public GatewayResponse(int status, Map<String, List<String>> headers, byte[] body) { super(status, headers, body); }
+    }
 }

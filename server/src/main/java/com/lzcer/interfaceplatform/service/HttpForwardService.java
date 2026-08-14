@@ -1,6 +1,7 @@
 package com.lzcer.interfaceplatform.service;
 
 import com.lzcer.interfaceplatform.common.api.BusinessException;
+import com.lzcer.interfaceplatform.model.interfacecatalog.InterfaceModels;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -36,7 +37,7 @@ public class HttpForwardService {
         this.maxBodyBytes = maxBodyBytes;
     }
 
-    public ForwardResult forward(InterfaceService.RouteConfig route, ForwardRequest input)
+    public ForwardResult forward(InterfaceModels.RouteConfig route, ForwardRequest input)
             throws IOException, InterruptedException {
         if (input.body() != null && input.body().length > maxBodyBytes) {
             throw new BusinessException(HttpStatus.PAYLOAD_TOO_LARGE, "IP-REQUEST-001",

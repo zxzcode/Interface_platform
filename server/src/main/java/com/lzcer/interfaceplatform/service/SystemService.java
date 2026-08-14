@@ -4,6 +4,7 @@ import com.lzcer.interfaceplatform.common.api.BusinessException;
 import com.lzcer.interfaceplatform.mapper.SystemMapper;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
+import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
@@ -16,12 +17,13 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 
+import static com.lzcer.interfaceplatform.model.system.SystemModels.*;
+
 @Service
+@RequiredArgsConstructor
 public class SystemService {
     private static final Set<String> STATUSES = Set.of("ONLINE", "DEGRADED", "OFFLINE", "UNKNOWN");
     private final SystemMapper systemMapper;
-
-    public SystemService(SystemMapper systemMapper) { this.systemMapper = systemMapper; }
 
     public List<SystemView> list() {
         return systemMapper.findAll().stream().map(SystemService::toView).toList();
@@ -134,11 +136,5 @@ public class SystemService {
 
     private BusinessException notFound(long id) { return new BusinessException(HttpStatus.NOT_FOUND, "IP-SYSTEM-404", "系统档案不存在: " + id); }
 
-    public record SystemCommand(@NotBlank @Size(max = 40) String code,
-                                @NotBlank @Size(max = 100) String name,
-                                @NotBlank @Size(max = 500) String baseUrl,
-                                @NotBlank String status) {}
-    public record SystemView(long id, String code, String name, String baseUrl, String status,
-                             LocalDateTime createdAt, LocalDateTime updatedAt) {}
     private record Validated(String code, String name, String baseUrl, String status) {}
 }
